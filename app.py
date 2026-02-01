@@ -18,16 +18,33 @@ CREATE TABLE IF NOT EXISTS drivers (
 """)
 conn.commit()
 
-# Fetch REAL F1 drivers from official public data
-url = "https://ergast.com/api/f1/current/drivers.json"
-response = requests.get(url)
-data = response.json()
+drivers = []
 
-drivers = data["MRData"]["DriverTable"]["Drivers"]
+# Try fetching real F1 drivers (SAFE)
+try:
+    url = "https://ergast.com/api/f1/current/drivers.json"
+    response = requests.get(url, timeout=10)
+    response.raise_for_status()
+    data = response.json()
+    drivers = [
+        f"{d['givenName']} {d['familyName']}"
+        for d in data["MRData"]["DriverTable"]["Drivers"]
+    ]
+    source = "Live F1 data"
+except Exception:
+    # Fallback if internet/API fails
+    drivers = [
+        "Max Verstappen",
+        "Lewis Hamilton",
+        "Charles Leclerc",
+        "Lando Norris",
+        "Carlos Sainz"
+    ]
+    source = "Fallback cache (API unavailable)"
 
+# Auto-sync drivers safely
 new_drivers = 0
-for d in drivers:
-    name = f"{d['givenName']} {d['familyName']}"
+for name in drivers:
     cur.execute(
         "INSERT INTO drivers (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
         (name,)
@@ -36,10 +53,11 @@ for d in drivers:
 
 conn.commit()
 
-st.success("✅ Real F1 drivers synced automatically")
+st.success("✅ Driver sync completed")
+st.info(f"📡 Data source: {source}")
 st.write(f"🆕 New drivers added this run: {new_drivers}")
 
-# Show current drivers
+# Show drivers
 cur.execute("SELECT name FROM drivers ORDER BY name")
 all_drivers = cur.fetchall()
 
