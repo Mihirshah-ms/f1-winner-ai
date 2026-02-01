@@ -2,12 +2,9 @@ import streamlit as st
 import os
 import psycopg2
 import requests
-import csv
-from io import StringIO
 
 st.title("🏁 F1 Winner AI")
 
-# Connect to database
 db_url = os.getenv("DATABASE_URL")
 conn = psycopg2.connect(db_url)
 cur = conn.cursor()
@@ -22,28 +19,20 @@ CREATE TABLE IF NOT EXISTS drivers (
 conn.commit()
 
 drivers = []
-source = ""
 
-# Reliable GitHub-hosted F1 drivers dataset (VERIFIED)
-csv_url = "https://raw.githubusercontent.com/ergast/f1db/master/csv/drivers.csv"
-
+# Try fetching real F1 drivers (SAFE)
 try:
-    response = requests.get(csv_url, timeout=15)
+    url = "https://ergast.com/api/f1/current/drivers.json"
+    response = requests.get(url, timeout=10)
     response.raise_for_status()
-
-    csv_file = StringIO(response.text)
-    reader = csv.DictReader(csv_file)
-
-    for row in reader:
-        first = row.get("forename")
-        last = row.get("surname")
-        if first and last:
-            drivers.append(f"{first} {last}")
-
-    source = "GitHub F1 dataset (stable)"
-
+    data = response.json()
+    drivers = [
+        f"{d['givenName']} {d['familyName']}"
+        for d in data["MRData"]["DriverTable"]["Drivers"]
+    ]
+    source = "Live F1 data"
 except Exception:
-    # Absolute last-resort fallback (never crashes)
+    # Fallback if internet/API fails
     drivers = [
         "Max Verstappen",
         "Lewis Hamilton",
@@ -51,7 +40,7 @@ except Exception:
         "Lando Norris",
         "Carlos Sainz"
     ]
-    source = "Emergency fallback"
+    source = "Fallback cache (API unavailable)"
 
 # Auto-sync drivers safely
 new_drivers = 0
@@ -65,7 +54,7 @@ for name in drivers:
 conn.commit()
 
 st.success("✅ Driver sync completed")
-st.info(f"📦 Data source: {source}")
+st.info(f"📡 Data source: {source}")
 st.write(f"🆕 New drivers added this run: {new_drivers}")
 
 # Show drivers
