@@ -6,12 +6,26 @@ st.title("🏁 F1 Winner AI")
 
 db_url = os.getenv("DATABASE_URL")
 
-if not db_url:
-    st.error("Database not connected")
-else:
-    try:
-        conn = psycopg2.connect(db_url)
-        st.success("✅ Database connected successfully!")
-        conn.close()
-    except Exception as e:
-        st.error("❌ Database connection failed")
+conn = psycopg2.connect(db_url)
+cur = conn.cursor()
+
+# Create tables automatically
+cur.execute("""
+CREATE TABLE IF NOT EXISTS drivers (
+    id SERIAL PRIMARY KEY,
+    name TEXT UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS races (
+    id SERIAL PRIMARY KEY,
+    name TEXT,
+    season INT
+);
+""")
+
+conn.commit()
+
+st.success("✅ Database tables created successfully!")
+
+cur.close()
+conn.close()
