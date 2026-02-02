@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 
-st.title("🔍 F1 Qualifying Inspector — Finder Mode")
+st.title("🔍 F1 Qualifying Inspector — Type Safe")
 
 url = "https://f1api.dev/api/current/last/qualy"
 
@@ -13,21 +13,23 @@ try:
     st.success("✅ Qualifying data fetched successfully")
 
     races = data.get("races", [])
-    st.write(f"Races returned: {len(races)}")
+    st.write(f"Total races returned: {len(races)}")
 
     found = False
 
     for race in races:
-        # Show race metadata safely
+        # Skip non-dictionary items
+        if not isinstance(race, dict):
+            continue
+
         race_keys = list(race.keys())
 
-        # Try known qualifying keys
         for key in ["qualifyingResults", "qualyResults", "qualifying"]:
-            if key in race and race[key]:
+            if key in race and isinstance(race[key], list) and len(race[key]) > 0:
                 st.subheader("✅ Found race with qualifying data")
                 st.write("Race keys:", race_keys)
                 st.write("Qualifying key:", key)
-                st.subheader("Sample qualifying result")
+                st.subheader("Sample qualifying result object")
                 st.json(race[key][0])
                 found = True
                 break
@@ -36,7 +38,7 @@ try:
             break
 
     if not found:
-        st.warning("No race with qualifying data found in this response")
+        st.warning("No race with qualifying data found")
 
 except Exception as e:
     st.error("❌ Inspection error")
