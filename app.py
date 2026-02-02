@@ -10,17 +10,22 @@ db_url = os.getenv("DATABASE_URL")
 conn = psycopg2.connect(db_url)
 cur = conn.cursor()
 
-# --- Create drivers table ---
+# --- Ensure table exists (old or new) ---
 cur.execute("""
 CREATE TABLE IF NOT EXISTS f1_drivers (
     id SERIAL PRIMARY KEY,
-    driver_id TEXT UNIQUE,
-    first_name TEXT,
-    last_name TEXT,
-    short_name TEXT,
-    nationality TEXT,
-    number INT
+    driver_id TEXT UNIQUE
 );
+""")
+
+# --- Safe schema migration (adds columns if missing) ---
+cur.execute("""
+ALTER TABLE f1_drivers
+ADD COLUMN IF NOT EXISTS first_name TEXT,
+ADD COLUMN IF NOT EXISTS last_name TEXT,
+ADD COLUMN IF NOT EXISTS short_name TEXT,
+ADD COLUMN IF NOT EXISTS nationality TEXT,
+ADD COLUMN IF NOT EXISTS number INT;
 """)
 conn.commit()
 
@@ -45,15 +50,21 @@ try:
 except Exception:
     drivers = []
 
-# --- Insert drivers safely ---
+# --- Insert / update drivers safely ---
 added = 0
 for row in drivers:
     cur.execute(
         """
-        INSERT INTO f1_drivers 
+        INSERT INTO f1_drivers
         (driver_id, first_name, last_name, short_name, nationality, number)
         VALUES (%s, %s, %s, %s, %s, %s)
-        ON CONFLICT (driver_id) DO NOTHING
+        ON CONFLICT (driver_id)
+        DO UPDATE SET
+            first_name = EXCLUDED.first_name,
+            last_name = EXCLUDED.last_name,
+            short_name = EXCLUDED.short_name,
+            nationality = EXCLUDED.nationality,
+            number = EXCLUDED.number
         """,
         row
     )
@@ -61,8 +72,8 @@ for row in drivers:
 
 conn.commit()
 
-st.success("✅ F1 driver sync complete")
-st.write(f"🆕 New drivers added this run: {added}")
+st.success("✅ F1 driver sync complete (schema migrated)")
+st.write(f"🔄 Drivers processed this run: {added}")
 
 # --- Display drivers ---
 cur.execute("""
