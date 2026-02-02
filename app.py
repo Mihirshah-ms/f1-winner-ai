@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 
-st.title("🔍 F1 Qualifying Inspector — Safe Mode")
+st.title("🔍 F1 Qualifying Inspector — Finder Mode")
 
 url = "https://f1api.dev/api/current/last/qualy"
 
@@ -12,33 +12,32 @@ try:
 
     st.success("✅ Qualifying data fetched successfully")
 
-    st.subheader("Top-level keys")
-    st.write(list(data.keys()))
+    races = data.get("races", [])
+    st.write(f"Races returned: {len(races)}")
 
-    if "races" in data:
-        st.subheader("Number of races returned")
-        st.write(len(data["races"]))
+    found = False
 
-        if len(data["races"]) > 0:
-            race = data["races"][0]
-            st.subheader("Keys inside first race object")
-            st.write(list(race.keys()))
+    for race in races:
+        # Show race metadata safely
+        race_keys = list(race.keys())
 
-            # Try multiple possible result keys
-            for key in ["qualifyingResults", "qualyResults", "results"]:
-                if key in race:
-                    st.subheader(f"Found qualifying results under key: {key}")
-                    results = race[key]
-                    if len(results) > 0:
-                        st.subheader("Sample qualifying result object")
-                        st.json(results[0])
-                    break
-            else:
-                st.warning("No qualifying results array found in race object")
+        # Try known qualifying keys
+        for key in ["qualifyingResults", "qualyResults", "qualifying"]:
+            if key in race and race[key]:
+                st.subheader("✅ Found race with qualifying data")
+                st.write("Race keys:", race_keys)
+                st.write("Qualifying key:", key)
+                st.subheader("Sample qualifying result")
+                st.json(race[key][0])
+                found = True
+                break
 
-    st.subheader("Full raw JSON (for reference)")
-    st.json(data)
+        if found:
+            break
+
+    if not found:
+        st.warning("No race with qualifying data found in this response")
 
 except Exception as e:
-    st.error("❌ Unexpected error during inspection")
+    st.error("❌ Inspection error")
     st.write(str(e))
