@@ -51,9 +51,9 @@ for season, rnd, race_id in rounds:
         results = []
         
         for key in ["qualifyingResults", "qualyResults", "results"]:
-        if key in race and isinstance(race[key], list):
-            results = race[key]
-            break
+            if key in race and isinstance(race[key], list):
+                results = race[key]
+                break
 
 
         for r in results:
