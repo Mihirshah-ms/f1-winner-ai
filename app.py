@@ -1,28 +1,32 @@
 import streamlit as st
+import os
 import requests
-import csv
-from io import StringIO
 
-st.title("🔍 Formula E Driver Source Inspector")
+st.title("🔍 F1 Live Pulse API Inspector")
 
-url = "https://raw.githubusercontent.com/f1db/formula-e-db/master/csv/drivers.csv"
+api_key = os.getenv("RAPIDAPI_KEY")
+
+if not api_key:
+    st.error("❌ RAPIDAPI_KEY not found in environment variables")
+    st.stop()
+
+url = "https://f1-live-pulse.p.rapidapi.com/drivers"
+
+headers = {
+    "x-rapidapi-key": api_key,
+    "x-rapidapi-host": "f1-live-pulse.p.rapidapi.com"
+}
 
 try:
-    response = requests.get(url, timeout=15)
+    response = requests.get(url, headers=headers, timeout=15)
     response.raise_for_status()
 
-    csv_file = StringIO(response.text)
-    reader = csv.DictReader(csv_file)
+    data = response.json()
 
-    rows = list(reader)
-
-    st.success("✅ Successfully fetched Formula E driver data")
-    st.write(f"Rows found: {len(rows)}")
-
-    st.subheader("Sample drivers (first 5)")
-    for r in rows[:5]:
-        st.write(r)
+    st.success("✅ Successfully fetched data from F1 Live Pulse")
+    st.write("Raw response:")
+    st.json(data)
 
 except Exception as e:
-    st.error("❌ Failed to fetch Formula E driver data")
+    st.error("❌ Failed to fetch data from F1 Live Pulse")
     st.write(str(e))
