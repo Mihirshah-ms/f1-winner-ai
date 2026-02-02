@@ -20,20 +20,21 @@ CREATE TABLE IF NOT EXISTS drivers (
 """)
 conn.commit()
 
-# Try Ergast (stable source)
 drivers = []
+
+# Fetch drivers from jolpica-f1 (stable replacement for Ergast)
 try:
-    url = "https://ergast.com/api/f1/current/drivers.json"
+    url = "https://api.jolpica.com/f1/drivers"
     response = requests.get(url, timeout=10)
     response.raise_for_status()
 
     data = response.json()
     drivers = [
         (d["driverId"], f"{d['givenName']} {d['familyName']}")
-        for d in data["MRData"]["DriverTable"]["Drivers"]
+        for d in data.get("drivers", [])
     ]
 except Exception:
-    # Silent fallback (do nothing)
+    # Silent failure (app never crashes)
     drivers = []
 
 # Insert drivers safely
@@ -51,7 +52,7 @@ for driver_id, name in drivers:
 
 conn.commit()
 
-st.success("✅ Ergast driver sync complete")
+st.success("✅ jolpica-f1 driver sync complete")
 st.write(f"🆕 New drivers added this run: {added}")
 
 # Show drivers
