@@ -1,104 +1,98 @@
 import streamlit as st
 import os
 import psycopg2
-import requests
 
-st.title("🏁 F1 Winner AI — Qualifying Sync (f1connectapi FULL)")
+st.title("🏁 F1 Winner AI — Qualifying Features (Balanced & Clean)")
 
 # ---------------- DB CONNECTION ----------------
 db_url = os.getenv("DATABASE_URL")
 conn = psycopg2.connect(db_url)
 cur = conn.cursor()
 
-# ---------------- ENSURE TABLE EXISTS ----------------
+# ---------------- CREATE FEATURES TABLE ----------------
 cur.execute("""
-CREATE TABLE IF NOT EXISTS f1_qualifying_results (
+CREATE TABLE IF NOT EXISTS f1_qualifying_features (
     id SERIAL PRIMARY KEY,
     season INT,
     round INT,
     race_id TEXT,
     driver_id TEXT,
-    position INT,
-    q1_time TEXT,
-    q2_time TEXT,
-    q3_time TEXT,
+    grid_position INT,
+    reached_q1 INT,
+    reached_q2 INT,
+    reached_q3 INT,
+    q1_seconds FLOAT,
+    q2_seconds FLOAT,
+    q3_seconds FLOAT,
+    qualy_score FLOAT,
     UNIQUE (season, round, driver_id)
 );
 """)
 conn.commit()
 
-# ---------------- GET COMPLETED ROUNDS ----------------
+# ---------------- HELPER ----------------
+def time_to_seconds(t):
+    if not t or ":" not in t:
+        return None
+    mins, secs = t.split(":")
+    return float(mins) * 60 + float(secs)
+
+# ---------------- BUILD FEATURES ----------------
 cur.execute("""
-SELECT DISTINCT season, round, race_id
-FROM f1_races
-WHERE race_date <= CURRENT_DATE
-ORDER BY round
+SELECT season, round, race_id, driver_id, position, q1_time, q2_time, q3_time
+FROM f1_qualifying_results
+WHERE position IS NOT NULL
 """)
-rounds = cur.fetchall()
 
+rows = cur.fetchall()
 inserted = 0
-updated = 0
 
-# ---------------- FETCH & UPSERT QUALIFYING ----------------
-for season, rnd, race_id in rounds:
-    try:
-        url = f"https://f1connectapi.vercel.app/api/{season}/{rnd}/qualy"
-        r = requests.get(url, timeout=20)
-        r.raise_for_status()
-        data = r.json()
+for season, rnd, race_id, driver, pos, q1, q2, q3 in rows:
+    q1_s = time_to_seconds(q1)
+    q2_s = time_to_seconds(q2)
+    q3_s = time_to_seconds(q3)
 
-        race = data.get("races", {})
-        results = race.get("qualyResults", [])
+    reached_q1 = 1
+    reached_q2 = 1 if q2_s is not None else 0
+    reached_q3 = 1 if q3_s is not None else 0
 
-        for res in results:
-            driver_id = res.get("driverId")
-            raw_position = res.get("gridPosition")
+    qualy_score = (
+        (1 / pos) * 6
+        + reached_q3 * 3
+        + reached_q2 * 2
+        + reached_q1 * 1
+    )
 
-            position = int(raw_position) if isinstance(raw_position, int) or (
-                isinstance(raw_position, str) and raw_position.isdigit()
-            ) else None
+    cur.execute("""
+    INSERT INTO f1_qualifying_features
+    (season, round, race_id, driver_id, grid_position,
+     reached_q1, reached_q2, reached_q3,
+     q1_seconds, q2_seconds, q3_seconds, qualy_score)
+    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    ON CONFLICT (season, round, driver_id) DO NOTHING
+    """, (
+        season, rnd, race_id, driver, pos,
+        reached_q1, reached_q2, reached_q3,
+        q1_s, q2_s, q3_s, qualy_score
+    ))
 
-            q1 = res.get("q1")
-            q2 = res.get("q2")
-            q3 = res.get("q3")
+    inserted += cur.rowcount
 
-            cur.execute("""
-            INSERT INTO f1_qualifying_results
-            (season, round, race_id, driver_id, position, q1_time, q2_time, q3_time)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (season, round, driver_id) DO UPDATE SET
-                position = EXCLUDED.position,
-                q1_time = EXCLUDED.q1_time,
-                q2_time = EXCLUDED.q2_time,
-                q3_time = EXCLUDED.q3_time
-            """, (season, rnd, race_id, driver_id, position, q1, q2, q3))
+conn.commit()
 
-            if cur.rowcount == 1:
-                inserted += 1
-            else:
-                updated += 1
-
-        conn.commit()
-
-    except Exception as e:
-        conn.rollback()  # reset failed transaction
-        st.warning(f"Skipped {season} round {rnd}: {e}")
-
-st.success("✅ Qualifying sync complete (f1connectapi)")
-st.write(f"🆕 Inserted rows: {inserted}")
-st.write(f"🔁 Updated rows: {updated}")
+st.success("✅ Qualifying features generated (Balanced)")
+st.write(f"📊 Feature rows created: {inserted}")
 
 # ---------------- DISPLAY SAMPLE ----------------
 cur.execute("""
-SELECT season, round, driver_id, position, q1_time, q2_time, q3_time
-FROM f1_qualifying_results
-ORDER BY season DESC, round DESC, position
+SELECT driver_id, grid_position, reached_q3, qualy_score
+FROM f1_qualifying_features
+ORDER BY qualy_score DESC
 LIMIT 12
 """)
-rows = cur.fetchall()
 
-st.subheader("Sample Qualifying Results (FULL)")
-for row in rows:
+st.subheader("Top Qualifying Scores (Sample)")
+for row in cur.fetchall():
     st.write(row)
 
 cur.close()
