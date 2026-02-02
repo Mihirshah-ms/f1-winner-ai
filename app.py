@@ -121,6 +121,8 @@ conn.close()
 if df_next.empty:
     st.warning("⚠️ Next-race data not available yet. Showing prediction using latest race data instead.")
 
+    fallback_conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+
     df_next = pd.read_sql(f"""
     WITH latest_team AS (
         SELECT DISTINCT ON (driver_id)
@@ -147,9 +149,9 @@ if df_next.empty:
      AND q.driver_id = d.driver_id
     WHERE q.season = {season}
       AND q.round = {latest["round"]}
-    """, conn)
+    """, fallback_conn)
 
-    conn.close()
+    fallback_conn.close()
 
 # Continue prediction as normal below
     # -------------------------------------------------
