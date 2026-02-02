@@ -52,7 +52,12 @@ for season, rnd, race_id in rounds:
 
         for res in results:
             driver_id = res.get("driverId")
-            position = res.get("gridPosition")
+            raw_position = res.get("gridPosition")
+
+            position = int(raw_position) if isinstance(raw_position, int) or (
+                isinstance(raw_position, str) and raw_position.isdigit()
+            ) else None
+
             q1 = res.get("q1")
             q2 = res.get("q2")
             q3 = res.get("q3")
@@ -76,6 +81,7 @@ for season, rnd, race_id in rounds:
         conn.commit()
 
     except Exception as e:
+        conn.rollback()  # reset failed transaction
         st.warning(f"Skipped {season} round {rnd}: {e}")
 
 st.success("✅ Qualifying sync complete (f1connectapi)")
