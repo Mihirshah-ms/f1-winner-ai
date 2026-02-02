@@ -1,45 +1,27 @@
 import streamlit as st
-import os
-import psycopg2
+import requests
 
-st.title("🏁 F1 Winner AI — Weighted Predictor (24 Races)")
+st.title("🔍 F1 Qualifying Inspector — Last Session")
 
-# ---------------- DB CONNECTION ----------------
-db_url = os.getenv("DATABASE_URL")
-conn = psycopg2.connect(db_url)
-cur = conn.cursor()
+url = "https://f1api.dev/api/current/last/qualy"
 
-# ---------------- FETCH LAST 24 RACES ----------------
-cur.execute("""
-SELECT race_id, winner_driver_id
-FROM f1_races
-WHERE winner_driver_id IS NOT NULL
-ORDER BY race_date DESC
-LIMIT 24
-""")
+try:
+    response = requests.get(url, timeout=20)
+    response.raise_for_status()
+    data = response.json()
 
-recent_races = cur.fetchall()
+    st.success("✅ Successfully fetched last qualifying data")
+    st.write("Raw response:")
+    st.json(data)
 
-# ---------------- APPLY WEIGHTS ----------------
-weights = {}
-total_races = len(recent_races)
+    # Show one sample driver object (if exists)
+    races = data.get("races", [])
+    if races:
+        results = races[0].get("qualifyingResults", [])
+        if results:
+            st.subheader("Sample qualifying result (one driver)")
+            st.json(results[0])
 
-for index, (_, driver_id) in enumerate(recent_races):
-    weight = total_races - index  # 24 → 1
-    weights[driver_id] = weights.get(driver_id, 0) + weight
-
-# ---------------- DISPLAY WEIGHTED SCORES ----------------
-st.subheader("📊 Weighted Scores (Last 24 Races)")
-
-for driver, score in sorted(weights.items(), key=lambda x: x[1], reverse=True):
-    st.write(f"• {driver} → {score}")
-
-# ---------------- FINAL PREDICTION ----------------
-if weights:
-    predicted_winner = max(weights, key=weights.get)
-    st.success(f"🔮 Weighted Prediction for next race: **{predicted_winner}**")
-else:
-    st.warning("Not enough race data to make a prediction")
-
-cur.close()
-conn.close()
+except Exception as e:
+    st.error("❌ Failed to fetch qualifying data")
+    st.write(str(e))
