@@ -15,8 +15,11 @@ cur.execute("""
 CREATE TABLE IF NOT EXISTS f1_drivers (
     id SERIAL PRIMARY KEY,
     driver_id TEXT UNIQUE,
-    name TEXT,
-    code TEXT
+    first_name TEXT,
+    last_name TEXT,
+    short_name TEXT,
+    nationality TEXT,
+    number INT
 );
 """)
 conn.commit()
@@ -27,14 +30,16 @@ try:
     url = "https://f1api.dev/api/current/drivers"
     response = requests.get(url, timeout=15)
     response.raise_for_status()
-
     data = response.json()
 
     for d in data.get("drivers", []):
         drivers.append((
             d.get("driverId"),
-            f"{d.get('givenName')} {d.get('familyName')}",
-            d.get("code")
+            d.get("name"),
+            d.get("surname"),
+            d.get("shortName"),
+            d.get("nationality"),
+            d.get("number")
         ))
 
 except Exception:
@@ -42,14 +47,15 @@ except Exception:
 
 # --- Insert drivers safely ---
 added = 0
-for driver_id, name, code in drivers:
+for row in drivers:
     cur.execute(
         """
-        INSERT INTO f1_drivers (driver_id, name, code)
-        VALUES (%s, %s, %s)
+        INSERT INTO f1_drivers 
+        (driver_id, first_name, last_name, short_name, nationality, number)
+        VALUES (%s, %s, %s, %s, %s, %s)
         ON CONFLICT (driver_id) DO NOTHING
         """,
-        (driver_id, name, code)
+        row
     )
     added += cur.rowcount
 
@@ -59,12 +65,16 @@ st.success("✅ F1 driver sync complete")
 st.write(f"🆕 New drivers added this run: {added}")
 
 # --- Display drivers ---
-cur.execute("SELECT name, code FROM f1_drivers ORDER BY name")
+cur.execute("""
+SELECT first_name, last_name, short_name, nationality, number
+FROM f1_drivers
+ORDER BY last_name
+""")
 rows = cur.fetchall()
 
 st.subheader("Drivers in Database")
-for name, code in rows:
-    st.write(f"• {name} ({code})")
+for r in rows:
+    st.write(f"• {r[0]} {r[1]} ({r[2]}) – #{r[4]} – {r[3]}")
 
 cur.close()
 conn.close()
