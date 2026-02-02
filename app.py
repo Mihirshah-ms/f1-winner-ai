@@ -149,6 +149,8 @@ if df_next.empty:
       AND q.round = {latest["round"]}
     """, conn)
 
+    conn.close()
+
 # Continue prediction as normal below
     # -------------------------------------------------
     # PREDICT WIN PROBABILITIES
