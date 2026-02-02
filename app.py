@@ -52,6 +52,12 @@ for season, rnd, race_id in races:
             raw_pos = res.get("position")
             position = int(raw_pos) if raw_pos and str(raw_pos).isdigit() else None
 
+            driver = res.get("driver", {})
+            team = res.get("team", {})
+
+            driver_id = driver.get("driverId")
+            team_id = team.get("teamId")
+
             cur.execute("""
             INSERT INTO f1_race_results
             (season, round, race_id, driver_id, team_id, position, status)
@@ -61,11 +67,12 @@ for season, rnd, race_id in races:
                 season,
                 rnd,
                 race_id,
-                res.get("driverId"),
-                res.get("teamId"),
+                driver_id,
+                team_id,
                 position,
                 res.get("status")
             ))
+
 
             inserted += cur.rowcount
 
@@ -74,6 +81,9 @@ for season, rnd, race_id in races:
     except Exception as e:
         conn.rollback()
         st.warning(f"Skipped {season} round {rnd}: {e}")
+
+cur.execute("DELETE FROM f1_race_results WHERE driver_id IS NULL")
+conn.commit()
 
 st.success("✅ Race results synced")
 st.write(f"🏁 Race result rows added: {inserted}")
