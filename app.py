@@ -3,7 +3,7 @@ import os
 import psycopg2
 from collections import defaultdict, deque
 
-st.title("🏎️ F1 Winner AI — Constructor Strength (24-Race Window)")
+st.title("🏁 F1 Winner AI — Driver Recent Form (Last 5 Races)")
 
 # ---------------- DB CONNECTION ----------------
 db_url = os.getenv("DATABASE_URL")
@@ -12,22 +12,21 @@ cur = conn.cursor()
 
 # ---------------- CREATE TABLE ----------------
 cur.execute("""
-CREATE TABLE IF NOT EXISTS f1_constructor_strength (
+CREATE TABLE IF NOT EXISTS f1_driver_recent_form (
     id SERIAL PRIMARY KEY,
     season INT,
     round INT,
-    team_id TEXT,
-    avg_finish_position_24 FLOAT,
+    driver_id TEXT,
+    avg_finish_5 FLOAT,
     races_count INT,
-    constructor_score FLOAT,
-    UNIQUE (season, round, team_id)
+    UNIQUE (season, round, driver_id)
 );
 """)
 conn.commit()
 
 # ---------------- FETCH RACE RESULTS ----------------
 cur.execute("""
-SELECT season, round, team_id, position
+SELECT season, round, driver_id, position
 FROM f1_race_results
 WHERE position IS NOT NULL
 ORDER BY season, round
@@ -35,47 +34,45 @@ ORDER BY season, round
 
 rows = cur.fetchall()
 
-history = defaultdict(lambda: deque(maxlen=24))
+history = defaultdict(lambda: deque(maxlen=5))
 inserted = 0
 
-# ---------------- COMPUTE ROLLING STRENGTH ----------------
-for season, rnd, team_id, pos in rows:
-    history[team_id].append(pos)
+# ---------------- COMPUTE FORM ----------------
+for season, rnd, driver_id, pos in rows:
+    history[driver_id].append(pos)
 
-    if len(history[team_id]) >= 5:  # minimum data
-        avg_pos = sum(history[team_id]) / len(history[team_id])
-        constructor_score = 10 / avg_pos
+    if len(history[driver_id]) >= 3:  # minimum form data
+        avg_pos = sum(history[driver_id]) / len(history[driver_id])
 
         cur.execute("""
-        INSERT INTO f1_constructor_strength
-        (season, round, team_id, avg_finish_position_24, races_count, constructor_score)
-        VALUES (%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (season, round, team_id) DO NOTHING
+        INSERT INTO f1_driver_recent_form
+        (season, round, driver_id, avg_finish_5, races_count)
+        VALUES (%s,%s,%s,%s,%s)
+        ON CONFLICT (season, round, driver_id) DO NOTHING
         """, (
             season,
             rnd,
-            team_id,
+            driver_id,
             avg_pos,
-            len(history[team_id]),
-            constructor_score
+            len(history[driver_id])
         ))
 
         inserted += cur.rowcount
 
 conn.commit()
 
-st.success("✅ Constructor strength computed")
-st.write(f"🏗️ Rows created: {inserted}")
+st.success("✅ Driver recent form computed")
+st.write(f"🏎️ Rows created: {inserted}")
 
 # ---------------- DISPLAY SAMPLE ----------------
 cur.execute("""
-SELECT team_id, avg_finish_position_24, constructor_score
-FROM f1_constructor_strength
-ORDER BY constructor_score DESC
+SELECT driver_id, avg_finish_5
+FROM f1_driver_recent_form
+ORDER BY avg_finish_5
 LIMIT 10
 """)
 
-st.subheader("Top Constructors (Sample)")
+st.subheader("Drivers in Best Recent Form")
 for row in cur.fetchall():
     st.write(row)
 
