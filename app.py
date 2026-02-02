@@ -3,7 +3,7 @@ import requests
 
 st.title("🔍 jolpica-f1 Driver Data Inspector")
 
-url = "https://api.jolpica.com/f1/drivers"
+url = "https://api.jolpi.ca/f1/drivers"
 
 try:
     response = requests.get(url, timeout=10)
