@@ -7,10 +7,10 @@ st.title("🔍 F1 Live Pulse API Inspector")
 api_key = os.getenv("RAPIDAPI_KEY")
 
 if not api_key:
-    st.error("❌ RAPIDAPI_KEY not found in environment variables")
+    st.error("❌ RAPIDAPI_KEY not found")
     st.stop()
 
-url = "https://f1-live-pulse.p.rapidapi.com/drivers"
+url = "https://f1-live-pulse.p.rapidapi.com/fiaDocuments"
 
 headers = {
     "x-rapidapi-key": api_key,
@@ -23,10 +23,10 @@ try:
 
     data = response.json()
 
-    st.success("✅ Successfully fetched data from F1 Live Pulse")
+    st.success("✅ Successfully fetched FIA documents")
     st.write("Raw response:")
     st.json(data)
 
 except Exception as e:
-    st.error("❌ Failed to fetch data from F1 Live Pulse")
+    st.error("❌ Failed to fetch FIA documents")
     st.write(str(e))
