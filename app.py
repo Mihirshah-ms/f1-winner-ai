@@ -1,39 +1,28 @@
 import streamlit as st
-import os
-import psycopg2
+import requests
+import csv
+from io import StringIO
 
-st.title("⚡ Formula E Winner AI")
+st.title("🔍 Formula E Driver Source Inspector")
 
-# Connect to database
-db_url = os.getenv("DATABASE_URL")
-conn = psycopg2.connect(db_url)
-cur = conn.cursor()
+url = "https://raw.githubusercontent.com/f1db/formula-e-db/master/csv/drivers.csv"
 
-# Create Formula E tables (SAFE – does not touch F1 tables)
-cur.execute("""
-CREATE TABLE IF NOT EXISTS fe_drivers (
-    id SERIAL PRIMARY KEY,
-    driver_code TEXT UNIQUE,
-    name TEXT
-);
+try:
+    response = requests.get(url, timeout=15)
+    response.raise_for_status()
 
-CREATE TABLE IF NOT EXISTS fe_teams (
-    id SERIAL PRIMARY KEY,
-    team_code TEXT UNIQUE,
-    name TEXT
-);
+    csv_file = StringIO(response.text)
+    reader = csv.DictReader(csv_file)
 
-CREATE TABLE IF NOT EXISTS fe_races (
-    id SERIAL PRIMARY KEY,
-    race_code TEXT UNIQUE,
-    location TEXT,
-    season INT
-);
-""")
+    rows = list(reader)
 
-conn.commit()
+    st.success("✅ Successfully fetched Formula E driver data")
+    st.write(f"Rows found: {len(rows)}")
 
-st.success("✅ Formula E database structure ready")
+    st.subheader("Sample drivers (first 5)")
+    for r in rows[:5]:
+        st.write(r)
 
-cur.close()
-conn.close()
+except Exception as e:
+    st.error("❌ Failed to fetch Formula E driver data")
+    st.write(str(e))
