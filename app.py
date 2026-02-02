@@ -32,10 +32,27 @@ conn.commit()
 
 # ---------------- HELPER ----------------
 def time_to_seconds(t):
-    if not t or ":" not in t:
+    if not t:
         return None
-    mins, secs = t.split(":")
-    return float(mins) * 60 + float(secs)
+
+    parts = t.split(":")
+
+    try:
+        if len(parts) == 2:
+            # Format: M:SS.mmm
+            minutes = int(parts[0])
+            seconds = float(parts[1])
+        elif len(parts) == 3:
+            # Format: M:SS:mmm
+            minutes = int(parts[0])
+            seconds = int(parts[1]) + int(parts[2]) / 1000
+        else:
+            return None
+
+        return minutes * 60 + seconds
+
+    except Exception:
+        return None
 
 # ---------------- BUILD FEATURES ----------------
 cur.execute("""
