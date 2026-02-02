@@ -194,3 +194,9 @@ if df_next.empty:
 
 st.divider()
 st.caption("Built with ❤️ using real F1 data, ML, and full automation")
+
+# -------------------------------------------------
+# CLOSE DB CONNECTION (END OF APP)
+# -------------------------------------------------
+if conn:
+    conn.close()
