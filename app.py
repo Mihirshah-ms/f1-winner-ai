@@ -119,8 +119,37 @@ WHERE q.season = {season}
 conn.close()
 
 if df_next.empty:
-    st.warning("⚠️ Data for the next race is not available yet.")
-else:
+    st.warning("⚠️ Next-race data not available yet. Showing prediction using latest race data instead.")
+
+    df_next = pd.read_sql(f"""
+    WITH latest_team AS (
+        SELECT DISTINCT ON (driver_id)
+            driver_id,
+            team_id
+        FROM f1_race_results
+        ORDER BY driver_id, season DESC, round DESC
+    )
+    SELECT
+        q.driver_id,
+        q.qualy_score,
+        c.constructor_score,
+        d.avg_finish_5 AS avg_driver_form
+    FROM f1_qualifying_features q
+    JOIN latest_team lt
+      ON q.driver_id = lt.driver_id
+    JOIN f1_constructor_strength c
+      ON c.team_id = lt.team_id
+     AND c.season = q.season
+     AND c.round = q.round
+    JOIN f1_driver_recent_form d
+      ON q.season = d.season
+     AND q.round = d.round
+     AND q.driver_id = d.driver_id
+    WHERE q.season = {season}
+      AND q.round = {latest["round"]}
+    """, conn)
+
+# Continue prediction as normal below
     # -------------------------------------------------
     # PREDICT WIN PROBABILITIES
     # -------------------------------------------------
