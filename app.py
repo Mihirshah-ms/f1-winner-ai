@@ -1,19 +1,39 @@
 import streamlit as st
-import requests
+import os
+import psycopg2
 
-st.title("🔍 jolpica-f1 Driver Data Inspector")
+st.title("⚡ Formula E Winner AI")
 
-url = "https://api.jolpi.ca/f1/drivers"
+# Connect to database
+db_url = os.getenv("DATABASE_URL")
+conn = psycopg2.connect(db_url)
+cur = conn.cursor()
 
-try:
-    response = requests.get(url, timeout=10)
-    response.raise_for_status()
-    data = response.json()
+# Create Formula E tables (SAFE – does not touch F1 tables)
+cur.execute("""
+CREATE TABLE IF NOT EXISTS fe_drivers (
+    id SERIAL PRIMARY KEY,
+    driver_code TEXT UNIQUE,
+    name TEXT
+);
 
-    st.success("✅ Successfully fetched data from jolpica-f1")
-    st.write("Raw response:")
-    st.json(data)
+CREATE TABLE IF NOT EXISTS fe_teams (
+    id SERIAL PRIMARY KEY,
+    team_code TEXT UNIQUE,
+    name TEXT
+);
 
-except Exception as e:
-    st.error("❌ Failed to fetch data")
-    st.write(str(e))
+CREATE TABLE IF NOT EXISTS fe_races (
+    id SERIAL PRIMARY KEY,
+    race_code TEXT UNIQUE,
+    location TEXT,
+    season INT
+);
+""")
+
+conn.commit()
+
+st.success("✅ Formula E database structure ready")
+
+cur.close()
+conn.close()
