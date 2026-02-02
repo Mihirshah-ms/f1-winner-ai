@@ -66,14 +66,19 @@ st.write(f"🏎️ Rows created: {inserted}")
 
 # ---------------- DISPLAY SAMPLE ----------------
 cur.execute("""
-SELECT driver_id, avg_finish_5
+SELECT DISTINCT ON (driver_id)
+    driver_id,
+    avg_finish_5
 FROM f1_driver_recent_form
-ORDER BY avg_finish_5
-LIMIT 10
+ORDER BY driver_id, season DESC, round DESC
 """)
 
-st.subheader("Drivers in Best Recent Form")
-for row in cur.fetchall():
+rows = cur.fetchall()
+
+rows = sorted(rows, key=lambda x: x[1])[:10]
+
+st.subheader("Drivers in Best Recent Form (Latest Only)")
+for row in rows:
     st.write(row)
 
 cur.close()
