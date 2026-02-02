@@ -1,8 +1,9 @@
 import streamlit as st
 import os
 import psycopg2
+import requests
 
-st.title("🏎️ F1 Winner AI — Constructor Strength (Last 24 Races)")
+st.title("🏁 F1 Winner AI — Race Results Sync (FULL)")
 
 # ---------------- DB CONNECTION ----------------
 db_url = os.getenv("DATABASE_URL")
@@ -11,75 +12,81 @@ cur = conn.cursor()
 
 # ---------------- CREATE TABLE ----------------
 cur.execute("""
-CREATE TABLE IF NOT EXISTS f1_constructor_strength (
+CREATE TABLE IF NOT EXISTS f1_race_results (
     id SERIAL PRIMARY KEY,
     season INT,
     round INT,
+    race_id TEXT,
+    driver_id TEXT,
     team_id TEXT,
-    avg_finish_position_24 FLOAT,
-    races_count INT,
-    constructor_score FLOAT,
-    UNIQUE (season, round, team_id)
+    position INT,
+    status TEXT,
+    UNIQUE (season, round, driver_id)
 );
 """)
 conn.commit()
 
-# ---------------- FETCH DRIVER RACE RESULTS ----------------
+# ---------------- GET COMPLETED RACES ----------------
 cur.execute("""
-SELECT
-    r.season,
-    r.round,
-    rr.team_id,
-    rr.position
-FROM f1_race_results rr
-JOIN f1_races r ON rr.race_id = r.race_id
-WHERE rr.position IS NOT NULL
-ORDER BY r.season, r.round
+SELECT season, round, race_id
+FROM f1_races
+WHERE race_date <= CURRENT_DATE
+ORDER BY season, round
 """)
 
-rows = cur.fetchall()
-
-# ---------------- BUILD HISTORY ----------------
-from collections import defaultdict, deque
-
-history = defaultdict(lambda: deque(maxlen=24))
+races = cur.fetchall()
 inserted = 0
 
-for season, rnd, team_id, pos in rows:
-    history[team_id].append(pos)
+# ---------------- FETCH & INSERT RESULTS ----------------
+for season, rnd, race_id in races:
+    try:
+        url = f"https://f1api.dev/api/{season}/{rnd}/race"
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+        data = r.json()
 
-    if len(history[team_id]) >= 5:  # minimum data
-        avg_pos = sum(history[team_id]) / len(history[team_id])
-        constructor_score = 10 / avg_pos  # lower avg = stronger team
+        race = data.get("races", {})
+        results = race.get("results", [])
 
-        cur.execute("""
-        INSERT INTO f1_constructor_strength
-        (season, round, team_id, avg_finish_position_24, races_count, constructor_score)
-        VALUES (%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (season, round, team_id) DO NOTHING
-        """, (
-            season, rnd, team_id,
-            avg_pos,
-            len(history[team_id]),
-            constructor_score
-        ))
+        for res in results:
+            raw_pos = res.get("position")
+            position = int(raw_pos) if raw_pos and str(raw_pos).isdigit() else None
 
-        inserted += cur.rowcount
+            cur.execute("""
+            INSERT INTO f1_race_results
+            (season, round, race_id, driver_id, team_id, position, status)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (season, round, driver_id) DO NOTHING
+            """, (
+                season,
+                rnd,
+                race_id,
+                res.get("driverId"),
+                res.get("teamId"),
+                position,
+                res.get("status")
+            ))
 
-conn.commit()
+            inserted += cur.rowcount
 
-st.success("✅ Constructor strength computed")
-st.write(f"🏗️ Rows created: {inserted}")
+        conn.commit()
+
+    except Exception as e:
+        conn.rollback()
+        st.warning(f"Skipped {season} round {rnd}: {e}")
+
+st.success("✅ Race results synced")
+st.write(f"🏁 Race result rows added: {inserted}")
 
 # ---------------- DISPLAY SAMPLE ----------------
 cur.execute("""
-SELECT team_id, avg_finish_position_24, constructor_score
-FROM f1_constructor_strength
-ORDER BY constructor_score DESC
-LIMIT 10
+SELECT season, round, driver_id, team_id, position
+FROM f1_race_results
+ORDER BY season DESC, round DESC, position
+LIMIT 12
 """)
 
-st.subheader("Top Constructors (Sample)")
+st.subheader("Sample Race Results")
 for row in cur.fetchall():
     st.write(row)
 
