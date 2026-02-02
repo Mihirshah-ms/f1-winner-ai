@@ -1,85 +1,63 @@
 import streamlit as st
 import os
 import psycopg2
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.metrics import accuracy_score
 
-st.title("🤖 F1 Winner AI — Build Training Dataset")
+st.title("🤖 F1 Winner AI — Model Training")
 
-# ---------------- DB CONNECTION ----------------
+# ---------------- LOAD DATA ----------------
 db_url = os.getenv("DATABASE_URL")
 conn = psycopg2.connect(db_url)
-cur = conn.cursor()
 
-# ---------------- CREATE TRAINING TABLE ----------------
-cur.execute("""
-CREATE TABLE IF NOT EXISTS f1_training_data (
-    id SERIAL PRIMARY KEY,
-    season INT,
-    round INT,
-    driver_id TEXT,
-    qualy_score FLOAT,
-    constructor_score FLOAT,
-    avg_driver_form FLOAT,
-    winner INT,
-    UNIQUE (season, round, driver_id)
-);
-""")
-conn.commit()
-
-# ---------------- BUILD DATASET ----------------
-cur.execute("""
+df = pd.read_sql("""
 SELECT
-    rr.season,
-    rr.round,
-    rr.driver_id,
-    qf.qualy_score,
-    cs.constructor_score,
-    df.avg_finish_5,
-    CASE WHEN rr.position = 1 THEN 1 ELSE 0 END AS winner
-FROM f1_race_results rr
-JOIN f1_qualifying_features qf
-    ON rr.season = qf.season
-   AND rr.round = qf.round
-   AND rr.driver_id = qf.driver_id
-JOIN f1_constructor_strength cs
-    ON rr.season = cs.season
-   AND rr.round = cs.round
-   AND rr.team_id = cs.team_id
-JOIN f1_driver_recent_form df
-    ON rr.season = df.season
-   AND rr.round = df.round
-   AND rr.driver_id = df.driver_id
-WHERE rr.position IS NOT NULL
-""")
-
-rows = cur.fetchall()
-inserted = 0
-
-for row in rows:
-    cur.execute("""
-    INSERT INTO f1_training_data
-    (season, round, driver_id, qualy_score, constructor_score, avg_driver_form, winner)
-    VALUES (%s,%s,%s,%s,%s,%s,%s)
-    ON CONFLICT (season, round, driver_id) DO NOTHING
-    """, row)
-
-    inserted += cur.rowcount
-
-conn.commit()
-
-st.success("✅ Training dataset built")
-st.write(f"📊 Rows created: {inserted}")
-
-# ---------------- DISPLAY SAMPLE ----------------
-cur.execute("""
-SELECT driver_id, qualy_score, constructor_score, avg_driver_form, winner
+    qualy_score,
+    constructor_score,
+    avg_driver_form,
+    winner
 FROM f1_training_data
-ORDER BY season DESC, round DESC, winner DESC
-LIMIT 12
-""")
+""", conn)
 
-st.subheader("Sample Training Rows")
-for row in cur.fetchall():
-    st.write(row)
-
-cur.close()
 conn.close()
+
+st.write("Training rows:", len(df))
+
+# ---------------- PREPARE DATA ----------------
+X = df[["qualy_score", "constructor_score", "avg_driver_form"]]
+y = df["winner"]
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.25, random_state=42, stratify=y
+)
+
+# ---------------- TRAIN MODEL ----------------
+model = GradientBoostingClassifier(
+    n_estimators=200,
+    learning_rate=0.05,
+    max_depth=3,
+    random_state=42
+)
+
+model.fit(X_train, y_train)
+
+# ---------------- EVALUATE ----------------
+preds = model.predict(X_test)
+acc = accuracy_score(y_test, preds)
+
+st.success(f"✅ Model trained — Accuracy: {acc:.2f}")
+
+# ---------------- FEATURE IMPORTANCE ----------------
+st.subheader("Feature Importance")
+for name, importance in zip(X.columns, model.feature_importances_):
+    st.write(f"{name}: {importance:.3f}")
+
+# ---------------- PREDICT SAMPLE ----------------
+df["win_probability"] = model.predict_proba(X)[:, 1]
+
+st.subheader("Top Winner Probabilities (Sample)")
+st.dataframe(
+    df.sort_values("win_probability", ascending=False).head(10)
+)
