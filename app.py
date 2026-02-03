@@ -33,7 +33,6 @@ if st.button("Import 2025 Races"):
             circuit_country
         )
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (season, round) DO NOTHING
         """, (
             race.get("raceId"),
             2025,
