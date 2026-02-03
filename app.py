@@ -2,9 +2,12 @@ import streamlit as st
 import os
 import psycopg2
 import pandas as pd
+
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
 
 # ---------------- UI SETUP ----------------
 st.set_page_config(page_title="F1 Winner AI", layout="centered")
@@ -25,10 +28,9 @@ st.write(
 if st.button("Train ML Model"):
 
     try:
-        # Connect to DB
+        # ---------------- LOAD DATA ----------------
         conn = psycopg2.connect(DATABASE_URL)
 
-        # Load training data
         df = pd.read_sql("""
         SELECT
             qualy_score,
@@ -41,34 +43,17 @@ if st.button("Train ML Model"):
 
         conn.close()
 
-        # Guard: empty dataset
         if df.empty:
-            st.error("❌ No training data available yet.")
-            st.stop()
-
-        # ---------------- HANDLE MISSING VALUES ----------------
-        # Driver recent form (early season may be NULL)
-        df["avg_finish_5"] = df["avg_finish_5"].fillna(
-            df["avg_finish_5"].median()
-        )
-
-        # Constructor strength (early season may be NULL)
-        df["avg_team_finish_24"] = df["avg_team_finish_24"].fillna(
-            df["avg_team_finish_24"].median()
-        )
-
-        # Qualifying score is mandatory
-        df = df.dropna(subset=["qualy_score"])
-
-        # Guard: not enough rows
-        if len(df) < 20:
-            st.error("❌ Not enough data to train a model yet.")
-            st.write(f"Rows available: {len(df)}")
+            st.error("❌ No training data available.")
             st.stop()
 
         # ---------------- FEATURES / LABEL ----------------
         X = df[["qualy_score", "avg_finish_5", "avg_team_finish_24"]]
         y = df["winner"]
+
+        if y.nunique() < 2:
+            st.error("❌ Not enough class variation to train model.")
+            st.stop()
 
         # ---------------- TRAIN / TEST SPLIT ----------------
         X_train, X_test, y_train, y_test = train_test_split(
@@ -76,29 +61,34 @@ if st.button("Train ML Model"):
             y,
             test_size=0.2,
             random_state=42,
-            stratify=y if y.nunique() > 1 else None
+            stratify=y
         )
 
-        # ---------------- MODEL ----------------
-        model = LogisticRegression(max_iter=1000)
-        model.fit(X_train, y_train)
+        # ---------------- PIPELINE (IMPUTER + MODEL) ----------------
+        pipeline = Pipeline(steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+            ("model", LogisticRegression(max_iter=1000))
+        ])
 
-        # ---------------- EVALUATION ----------------
-        y_pred = model.predict(X_test)
-        y_prob = model.predict_proba(X_test)[:, 1]
+        # ---------------- TRAIN ----------------
+        pipeline.fit(X_train, y_train)
+
+        # ---------------- EVALUATE ----------------
+        y_pred = pipeline.predict(X_test)
+        y_prob = pipeline.predict_proba(X_test)[:, 1]
 
         accuracy = accuracy_score(y_test, y_pred)
-        auc = roc_auc_score(y_test, y_prob) if y_test.nunique() > 1 else None
+        auc = roc_auc_score(y_test, y_prob)
 
         st.success("✅ Model trained successfully")
         st.write(f"🎯 Accuracy: {accuracy:.2f}")
-
-        if auc:
-            st.write(f"📈 ROC-AUC: {auc:.2f}")
+        st.write(f"📈 ROC-AUC: {auc:.2f}")
 
         # ---------------- FEATURE IMPORTANCE ----------------
-        st.subheader("📊 Feature Importance (Model Weights)")
-        for feature, coef in zip(X.columns, model.coef_[0]):
+        st.subheader("📊 Feature Importance (Model Coefficients)")
+
+        coefs = pipeline.named_steps["model"].coef_[0]
+        for feature, coef in zip(X.columns, coefs):
             st.write(f"{feature}: {coef:.4f}")
 
     except Exception as e:
