@@ -37,7 +37,7 @@ if st.button("Import 2025 Races"):
         """, (
             race.get("raceId"),
             2025,
-            int(race.get("round")),
+            race.get("round"),
             race.get("raceName"),
             race.get("date"),
             race.get("time"),
