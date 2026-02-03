@@ -36,23 +36,26 @@ if st.button("Import 2025 Race Results"):
             pos_raw = res.get("position")
             position = None if pos_raw in [None, "-", "R", "DQ"] else int(pos_raw)
 
-            cur.execute("""
-            INSERT INTO f1_race_results (
-                season,
-                round,
-                race_id,
-                driver_id,
-                position
+            cur.execute(
+                """
+                INSERT INTO f1_race_results (
+                    season,
+                    round,
+                    race_id,
+                    driver_id,
+                    position
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
+                """,
+                (
+                    2025,
+                    rnd,
+                    race_id,
+                    res.get("driverId"),
+                    position
+                )
             )
-            VALUES (%s,%s,%s,%s,%s)
-            ON CONFLICT DO NOTHING
-            """, (
-                2025,
-                rnd,
-                race_id,
-                res.get("driverId"),
-                position
-            )))
 
             inserted += 1
 
