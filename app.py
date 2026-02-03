@@ -25,7 +25,7 @@ if st.button("Compute Driver Recent Form (2025)"):
     JOIN f1_race_results r2
         ON r1.driver_id = r2.driver_id
        AND r2.season = r1.season
-       AND r2.round BETWEEN r1.round - 5 AND r1.round - 1
+       AND r2.round < r1.round
     WHERE r1.season = 2025
       AND r2.position IS NOT NULL
     GROUP BY r1.season, r1.round, r1.driver_id;
