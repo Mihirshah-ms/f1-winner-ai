@@ -65,10 +65,13 @@ if st.button("Train ML Model"):
         )
 
         # ---------------- PIPELINE (IMPUTER + MODEL) ----------------
-        pipeline = Pipeline(steps=[
-            ("imputer", SimpleImputer(strategy="median")),
-            ("model", LogisticRegression(max_iter=1000))
-        ])
+        st.subheader("📊 Feature Importance (Model Coefficients)")
+
+        feature_names = pipeline.named_steps["imputer"].get_feature_names_out(X.columns)
+        coefs = pipeline.named_steps["model"].coef_[0]
+
+        for feature, coef in zip(feature_names, coefs):
+            st.write(f"{feature}: {coef:.4f}")
 
         # ---------------- TRAIN ----------------
         pipeline.fit(X_train, y_train)
