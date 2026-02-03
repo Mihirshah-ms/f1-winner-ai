@@ -51,11 +51,16 @@ if st.button("Import 2025 Qualifying"):
                 rnd,
                 race_id,
                 res.get("driverId"),
-                None if res.get("gridPosition") == "-" else int(res.get("gridPosition")),
-                res.get("q1"),
-                res.get("q2"),
-                res.get("q3")
-            ))
+                (
+                2025,
+                rnd,
+                race_id,
+                res.get("driverId"),
+                position,
+                q1,
+                q2,
+                q3
+            )
 
             inserted += 1
 
