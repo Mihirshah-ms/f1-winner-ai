@@ -85,7 +85,17 @@ FROM f1_training_data
 WHERE season = {BASELINE_SEASON}
 """, conn).iloc[0]
 
-baseline_round = int(latest_2025["round"])
+if latest_2025["round"] is not None:
+    baseline_round = int(latest_2025["round"])
+else:
+    # Fallback to race results if training data not ready yet
+    fallback = pd.read_sql(f"""
+    SELECT MAX(round) AS round
+    FROM f1_race_results
+    WHERE season = {BASELINE_SEASON}
+    """, conn).iloc[0]
+
+    baseline_round = int(fallback["round"])
 
 # Prediction season is NEXT year
 PREDICTION_SEASON = BASELINE_SEASON + 1
