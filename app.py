@@ -97,6 +97,7 @@ else:
 
     baseline_round = int(fallback["round"])
 
+
 # Prediction season is NEXT year
 PREDICTION_SEASON = BASELINE_SEASON + 1
 PREDICTION_ROUND = 1
