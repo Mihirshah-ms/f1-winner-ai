@@ -95,7 +95,9 @@ if st.button("Compute Qualifying Performance (2025)"):
 
         # Show sample
         cur.execute("""
-        SELECT driver_id, ROUND(qualy_score, 3) AS score
+        SELECT
+            driver_id,
+            ROUND(qualy_score::numeric, 3) AS score
         FROM f1_qualifying_features
         ORDER BY score
         LIMIT 10;
