@@ -87,17 +87,18 @@ st.header("🏆 Predicted Winner — Next Race")
 # -------------------------------------------------
 # NEXT RACE DETAILS (WHEN & WHERE)
 # -------------------------------------------------
-race_info = pd.read_sql(f"""
-SELECT
-    race_name,
-    race_date,
-    race_time,
-    city,
-    country
-FROM f1_races
-WHERE season = {season}
-  AND round = {next_round}
-""", conn)
+if race_info.empty:
+    race_info = pd.read_sql(f"""
+    SELECT
+        race_name,
+        race_date,
+        race_time,
+        circuit_name,
+        circuit_country
+    FROM f1_races
+    WHERE season = {season}
+      AND round = {latest["round"]}
+    """, conn)
 
 # If next race not available yet, fallback to latest race
 if race_info.empty:
