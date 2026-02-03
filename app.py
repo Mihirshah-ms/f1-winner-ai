@@ -21,14 +21,14 @@ if not DATABASE_URL:
 
 st.write(
     "This step trains a machine learning model to predict race winners "
-    "using qualifying performance, driver form, and constructor strength."
+    "using qualifying performance, driver recent form, and constructor strength."
 )
 
 # ---------------- TRAIN MODEL ----------------
 if st.button("Train ML Model"):
 
     try:
-        # ---------------- LOAD DATA ----------------
+        # ---------- LOAD DATA ----------
         conn = psycopg2.connect(DATABASE_URL)
 
         df = pd.read_sql("""
@@ -47,15 +47,15 @@ if st.button("Train ML Model"):
             st.error("❌ No training data available.")
             st.stop()
 
-        # ---------------- FEATURES / LABEL ----------------
+        # ---------- FEATURES / LABEL ----------
         X = df[["qualy_score", "avg_finish_5", "avg_team_finish_24"]]
         y = df["winner"]
 
         if y.nunique() < 2:
-            st.error("❌ Not enough class variation to train model.")
+            st.error("❌ Not enough class variation to train the model.")
             st.stop()
 
-        # ---------------- TRAIN / TEST SPLIT ----------------
+        # ---------- TRAIN / TEST SPLIT ----------
         X_train, X_test, y_train, y_test = train_test_split(
             X,
             y,
@@ -64,19 +64,16 @@ if st.button("Train ML Model"):
             stratify=y
         )
 
-        # ---------------- PIPELINE (IMPUTER + MODEL) ----------------
-        st.subheader("📊 Feature Importance (Model Coefficients)")
+        # ---------- PIPELINE (IMPUTER + MODEL) ----------
+        pipeline = Pipeline(steps=[
+            ("imputer", SimpleImputer(strategy="median", add_indicator=True)),
+            ("model", LogisticRegression(max_iter=1000))
+        ])
 
-        feature_names = pipeline.named_steps["imputer"].get_feature_names_out(X.columns)
-        coefs = pipeline.named_steps["model"].coef_[0]
-
-        for feature, coef in zip(feature_names, coefs):
-            st.write(f"{feature}: {coef:.4f}")
-
-        # ---------------- TRAIN ----------------
+        # ---------- TRAIN ----------
         pipeline.fit(X_train, y_train)
 
-        # ---------------- EVALUATE ----------------
+        # ---------- EVALUATE ----------
         y_pred = pipeline.predict(X_test)
         y_prob = pipeline.predict_proba(X_test)[:, 1]
 
@@ -87,11 +84,13 @@ if st.button("Train ML Model"):
         st.write(f"🎯 Accuracy: {accuracy:.2f}")
         st.write(f"📈 ROC-AUC: {auc:.2f}")
 
-        # ---------------- FEATURE IMPORTANCE ----------------
+        # ---------- FEATURE IMPORTANCE ----------
         st.subheader("📊 Feature Importance (Model Coefficients)")
 
+        feature_names = pipeline.named_steps["imputer"].get_feature_names_out(X.columns)
         coefs = pipeline.named_steps["model"].coef_[0]
-        for feature, coef in zip(X.columns, coefs):
+
+        for feature, coef in zip(feature_names, coefs):
             st.write(f"{feature}: {coef:.4f}")
 
     except Exception as e:
