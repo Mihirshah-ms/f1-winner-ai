@@ -34,8 +34,8 @@ if st.button("Import 2025 Race Results"):
 
         for res in results:
             pos_raw = res.get("position")
-            position = None if pos_raw in [None, "-", "R", "DQ"] else int(pos_raw)
-
+            position = None if pos_raw in [None, "-", "R", "DQ", "NC", "DNS", "DNF"] else int(pos_raw)
+            
             cur.execute(
                 """
                 INSERT INTO f1_race_results (
