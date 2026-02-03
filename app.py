@@ -87,6 +87,29 @@ st.header("🏆 Predicted Winner — Next Race")
 # -------------------------------------------------
 # NEXT RACE DETAILS (WHEN & WHERE)
 # -------------------------------------------------
+# -------------------------------------------------
+# NEXT RACE DETAILS (WHEN & WHERE)
+# -------------------------------------------------
+
+# Always define race_info first
+race_info = pd.DataFrame()
+
+try:
+    race_info = pd.read_sql(f"""
+    SELECT
+        race_name,
+        race_date,
+        race_time,
+        circuit_name,
+        circuit_country
+    FROM f1_races
+    WHERE season = {season}
+      AND round = {next_round}
+    """, conn)
+except Exception:
+    race_info = pd.DataFrame()
+
+# Fallback to latest race if next race not available
 if race_info.empty:
     race_info = pd.read_sql(f"""
     SELECT
@@ -100,26 +123,12 @@ if race_info.empty:
       AND round = {latest["round"]}
     """, conn)
 
-# If next race not available yet, fallback to latest race
-if race_info.empty:
-    race_info = pd.read_sql(f"""
-    SELECT
-        race_name,
-        race_date,
-        race_time,
-        city,
-        country
-    FROM f1_races
-    WHERE season = {season}
-      AND round = {latest["round"]}
-    """, conn)
-
 race = race_info.iloc[0]
 
 st.markdown(
     f"""
 📍 **{race['race_name']}**  
-🌍 {race['city']}, {race['country']}  
+🌍 {race['circuit_name']}, {race['circuit_country']}  
 🗓️ {race['race_date']}  
 ⏰ {race['race_time']} UTC
 """
