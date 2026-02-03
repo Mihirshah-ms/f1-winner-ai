@@ -74,13 +74,22 @@ for name, imp in sorted(zip(features, importances), key=lambda x: x[1], reverse=
 # -------------------------------------------------
 # FIND NEXT RACE
 # -------------------------------------------------
-latest = pd.read_sql("""
-SELECT MAX(season) AS season, MAX(round) AS round
+# -------------------------------------------------
+# BASELINE SEASON (LOCKED TO 2025)
+# -------------------------------------------------
+BASELINE_SEASON = 2025
+
+latest_2025 = pd.read_sql(f"""
+SELECT MAX(round) AS round
 FROM f1_training_data
+WHERE season = {BASELINE_SEASON}
 """, conn).iloc[0]
 
-season = int(latest["season"])
-next_round = int(latest["round"]) + 1
+baseline_round = int(latest_2025["round"])
+
+# Prediction season is NEXT year
+PREDICTION_SEASON = BASELINE_SEASON + 1
+PREDICTION_ROUND = 1
 
 st.divider()
 st.header("🏆 Predicted Winner — Next Race")
@@ -152,7 +161,8 @@ WITH latest_team AS (
         driver_id,
         team_id
     FROM f1_race_results
-    ORDER BY driver_id, season DESC, round DESC
+    WHERE season = {BASELINE_SEASON}
+    ORDER BY driver_id, round DESC
 )
 SELECT
     q.driver_id,
@@ -164,14 +174,14 @@ JOIN latest_team lt
   ON q.driver_id = lt.driver_id
 JOIN f1_constructor_strength c
   ON c.team_id = lt.team_id
- AND c.season = q.season
- AND c.round = q.round
+ AND c.season = {BASELINE_SEASON}
+ AND c.round = {baseline_round}
 JOIN f1_driver_recent_form d
-  ON q.season = d.season
- AND q.round = d.round
- AND q.driver_id = d.driver_id
-WHERE q.season = {season}
-  AND q.round = {next_round}
+  ON d.driver_id = q.driver_id
+ AND d.season = {BASELINE_SEASON}
+ AND d.round = {baseline_round}
+WHERE q.season = {PREDICTION_SEASON}
+  AND q.round = {PREDICTION_ROUND}
 """, conn)
 
 conn.close()
