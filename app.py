@@ -125,11 +125,20 @@ if race_info.empty:
 
 race = race_info.iloc[0]
 
+from datetime import datetime
+
+# Format race date nicely
+race_date = race["race_date"]
+if isinstance(race_date, str):
+    race_date = datetime.strptime(race_date, "%Y-%m-%d")
+
+formatted_date = race_date.strftime("%d %B %Y")
+
 st.markdown(
     f"""
 📍 **{race['race_name']}**  
 🌍 {race['circuit_name']}, {race['circuit_country']}  
-🗓️ {race['race_date']}  
+🗓️ {formatted_date}  
 ⏰ {race['race_time']} UTC
 """
 )
