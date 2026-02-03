@@ -3,15 +3,13 @@ import os
 import psycopg2
 import pandas as pd
 
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
 from sklearn.impute import SimpleImputer
 
 # ---------------- UI SETUP ----------------
 st.set_page_config(page_title="F1 Winner AI", layout="centered")
-st.title("🤖 F1 Winner AI — Model Training (2025)")
+st.title("🏆 F1 Winner AI — Next Race Prediction (2026)")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -20,79 +18,132 @@ if not DATABASE_URL:
     st.stop()
 
 st.write(
-    "This step trains a machine learning model to predict race winners "
-    "using qualifying performance, driver recent form, and constructor strength."
+    "This dashboard predicts the **winner of the next Formula 1 race** "
+    "using machine learning trained on 2025 season data."
 )
 
-# ---------------- TRAIN MODEL ----------------
-if st.button("Train ML Model"):
+# ---------------- DB CONNECTION ----------------
+conn = psycopg2.connect(DATABASE_URL)
 
-    try:
-        # ---------- LOAD DATA ----------
-        conn = psycopg2.connect(DATABASE_URL)
+# ---------------- FIND BASELINE SEASON & ROUND ----------------
+latest = pd.read_sql("""
+SELECT MAX(season) AS season, MAX(round) AS round
+FROM f1_training_data
+WHERE season = 2025;
+""", conn).iloc[0]
 
-        df = pd.read_sql("""
-        SELECT
-            qualy_score,
-            avg_finish_5,
-            avg_team_finish_24,
-            winner
-        FROM f1_training_data
-        WHERE winner IS NOT NULL;
-        """, conn)
+baseline_season = int(latest["season"])
+baseline_round = int(latest["round"])
 
-        conn.close()
+st.info(f"📊 Model trained using **Season {baseline_season}, Round {baseline_round}** as baseline")
 
-        if df.empty:
-            st.error("❌ No training data available.")
-            st.stop()
+# ---------------- LOAD TRAINING DATA ----------------
+train_df = pd.read_sql("""
+SELECT
+    qualy_score,
+    avg_finish_5,
+    avg_team_finish_24,
+    winner
+FROM f1_training_data
+WHERE season = 2025
+  AND winner IS NOT NULL;
+""", conn)
 
-        # ---------- FEATURES / LABEL ----------
-        X = df[["qualy_score", "avg_finish_5", "avg_team_finish_24"]]
-        y = df["winner"]
+X_train = train_df[["qualy_score", "avg_finish_5", "avg_team_finish_24"]]
+y_train = train_df["winner"]
 
-        if y.nunique() < 2:
-            st.error("❌ Not enough class variation to train the model.")
-            st.stop()
+# ---------------- TRAIN MODEL (ON LOAD) ----------------
+pipeline = Pipeline(steps=[
+    ("imputer", SimpleImputer(strategy="median", add_indicator=True)),
+    ("model", LogisticRegression(max_iter=1000))
+])
 
-        # ---------- TRAIN / TEST SPLIT ----------
-        X_train, X_test, y_train, y_test = train_test_split(
-            X,
-            y,
-            test_size=0.2,
-            random_state=42,
-            stratify=y
-        )
+pipeline.fit(X_train, y_train)
 
-        # ---------- PIPELINE (IMPUTER + MODEL) ----------
-        pipeline = Pipeline(steps=[
-            ("imputer", SimpleImputer(strategy="median", add_indicator=True)),
-            ("model", LogisticRegression(max_iter=1000))
-        ])
+# ---------------- DETERMINE NEXT RACE ----------------
+next_race = pd.read_sql("""
+SELECT season, round, race_name, race_date, circuit_name, circuit_country
+FROM f1_races
+WHERE season = 2026
+ORDER BY round
+LIMIT 1;
+""", conn)
 
-        # ---------- TRAIN ----------
-        pipeline.fit(X_train, y_train)
+use_fallback = False
 
-        # ---------- EVALUATE ----------
-        y_pred = pipeline.predict(X_test)
-        y_prob = pipeline.predict_proba(X_test)[:, 1]
+if next_race.empty:
+    use_fallback = True
+    next_race = pd.read_sql("""
+    SELECT season, round, race_name, race_date, circuit_name, circuit_country
+    FROM f1_races
+    WHERE season = 2025
+    ORDER BY round DESC
+    LIMIT 1;
+    """, conn)
 
-        accuracy = accuracy_score(y_test, y_pred)
-        auc = roc_auc_score(y_test, y_prob)
+race = next_race.iloc[0]
 
-        st.success("✅ Model trained successfully")
-        st.write(f"🎯 Accuracy: {accuracy:.2f}")
-        st.write(f"📈 ROC-AUC: {auc:.2f}")
+# ---------------- DISPLAY RACE INFO ----------------
+st.subheader("🏁 Upcoming Race")
 
-        # ---------- FEATURE IMPORTANCE ----------
-        st.subheader("📊 Feature Importance (Model Coefficients)")
+race_date = pd.to_datetime(race["race_date"]).strftime("%d %B %Y")
 
-        feature_names = pipeline.named_steps["imputer"].get_feature_names_out(X.columns)
-        coefs = pipeline.named_steps["model"].coef_[0]
+st.write(f"**Race:** {race['race_name']}")
+st.write(f"**Date:** {race_date}")
+st.write(f"**Location:** {race['circuit_name']}, {race['circuit_country']}")
 
-        for feature, coef in zip(feature_names, coefs):
-            st.write(f"{feature}: {coef:.4f}")
+if use_fallback:
+    st.warning("⚠️ 2026 race data not fully available yet. Using latest 2025 race context.")
 
-    except Exception as e:
-        st.error("❌ Model training failed")
-        st.code(str(e))
+# ---------------- LOAD FEATURES FOR PREDICTION ----------------
+features_df = pd.read_sql(f"""
+SELECT
+    q.driver_id,
+    q.qualy_score,
+    d.avg_finish_5,
+    c.avg_team_finish_24
+FROM f1_qualifying_features q
+LEFT JOIN f1_driver_recent_form d
+    ON q.driver_id = d.driver_id
+   AND q.season = d.season
+   AND q.round = d.round
+LEFT JOIN f1_constructor_strength c
+    ON q.season = c.season
+   AND q.round = c.round
+WHERE q.season = {baseline_season}
+  AND q.round = {baseline_round};
+""", conn)
+
+conn.close()
+
+if features_df.empty:
+    st.error("❌ Prediction data not available yet.")
+    st.stop()
+
+X_pred = features_df[["qualy_score", "avg_finish_5", "avg_team_finish_24"]]
+
+# ---------------- PREDICT ----------------
+probs = pipeline.predict_proba(X_pred)[:, 1]
+features_df["win_probability"] = probs
+
+winner_row = features_df.sort_values("win_probability", ascending=False).iloc[0]
+
+# ---------------- DISPLAY PREDICTION ----------------
+st.subheader("🥇 Predicted Winner")
+
+st.success(f"🏆 **{winner_row['driver_id'].upper()}**")
+
+st.write(
+    f"📈 **Win Probability:** {winner_row['win_probability']*100:.2f}%"
+)
+
+# ---------------- SHOW TOP 5 ----------------
+st.subheader("📊 Top 5 Win Probabilities")
+
+top5 = features_df.sort_values("win_probability", ascending=False).head(5)
+
+st.dataframe(
+    top5[["driver_id", "win_probability"]]
+    .assign(win_probability=lambda x: (x.win_probability * 100).round(2))
+    .rename(columns={"win_probability": "Win Probability (%)"})
+)
