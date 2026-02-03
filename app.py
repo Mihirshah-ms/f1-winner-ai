@@ -52,7 +52,7 @@ if st.button("Import 2025 Race Results"):
                 race_id,
                 res.get("driverId"),
                 position
-            ))
+            )))
 
             inserted += 1
 
