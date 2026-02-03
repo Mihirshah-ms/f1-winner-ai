@@ -86,7 +86,10 @@ race = next_race.iloc[0]
 # ---------------- DISPLAY RACE INFO ----------------
 st.subheader("🏁 Upcoming Race")
 
-race_date = pd.to_datetime(race["race_date"]).strftime("%d %B %Y")
+if race["race_date"]:
+    race_date = pd.to_datetime(race["race_date"]).strftime("%d %B %Y")
+else:
+    race_date = "TBA"
 
 st.write(f"**Race:** {race['race_name']}")
 st.write(f"**Date:** {race_date}")
