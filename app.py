@@ -84,6 +84,45 @@ next_round = int(latest["round"]) + 1
 
 st.divider()
 st.header("🏆 Predicted Winner — Next Race")
+# -------------------------------------------------
+# NEXT RACE DETAILS (WHEN & WHERE)
+# -------------------------------------------------
+race_info = pd.read_sql(f"""
+SELECT
+    race_name,
+    race_date,
+    race_time,
+    city,
+    country
+FROM f1_races
+WHERE season = {season}
+  AND round = {next_round}
+""", conn)
+
+# If next race not available yet, fallback to latest race
+if race_info.empty:
+    race_info = pd.read_sql(f"""
+    SELECT
+        race_name,
+        race_date,
+        race_time,
+        city,
+        country
+    FROM f1_races
+    WHERE season = {season}
+      AND round = {latest["round"]}
+    """, conn)
+
+race = race_info.iloc[0]
+
+st.markdown(
+    f"""
+📍 **{race['race_name']}**  
+🌍 {race['city']}, {race['country']}  
+🗓️ {race['race_date']}  
+⏰ {race['race_time']} UTC
+"""
+)
 
 # -------------------------------------------------
 # LOAD FEATURES FOR NEXT RACE
