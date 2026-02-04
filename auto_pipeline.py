@@ -14,6 +14,69 @@ MODEL_NAME = "f1_winner_model"
 MIN_ROWS_REQUIRED = 50
 
 print("🚀 AUTO PIPELINE STARTED")
+# ---------------- IMPORT RACE RESULTS (SAFE) ----------------
+print("🏁 Importing race results")
+
+import requests
+
+API_BASE = "https://f1connectapi.vercel.app/api"
+
+def safe_position(pos):
+    if pos in [None, "-", "NC", "DQ", "DNS", "DNF"]:
+        return None
+    try:
+        return int(pos)
+    except:
+        return None
+
+cur.execute("""
+CREATE TABLE IF NOT EXISTS f1_race_results (
+    season INT,
+    round INT,
+    race_id TEXT,
+    driver_id TEXT,
+    team_id TEXT,
+    position INT,
+    PRIMARY KEY (season, round, driver_id)
+);
+""")
+conn.commit()
+
+for season in [2024, 2025]:
+    print(f"📥 Fetching race results for {season}")
+
+    url = f"{API_BASE}/{season}"
+    data = requests.get(url).json()
+    races = data.get("races", [])
+
+    for race in races:
+        rnd = int(race["round"])
+        race_id = race["raceId"]
+
+        results = race.get("results", [])
+        if not results:
+            continue
+
+        for res in results:
+            position = safe_position(res.get("position"))
+
+            cur.execute("""
+            INSERT INTO f1_race_results (
+                season, round, race_id, driver_id, team_id, position
+            )
+            VALUES (%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (season, round, driver_id) DO NOTHING;
+            """, (
+                season,
+                rnd,
+                race_id,
+                res.get("driverId"),
+                res.get("teamId"),
+                position
+            ))
+
+conn.commit()
+print("✅ Race results import complete")
 
 # ---------------- DB CONNECTION ----------------
 DATABASE_URL = os.getenv("DATABASE_URL")
