@@ -2,304 +2,229 @@ import os
 import time
 import requests
 import psycopg2
-from psycopg2.extras import execute_values
 
-print("🚀 AUTO PIPELINE STARTED")
-
-# -------------------------------------------------
-# Config
-# -------------------------------------------------
-BASE_API = "https://f1api.dev/api"
-SLEEP_SECONDS = 1.2  # rate-limit safe
-SEASONS = [2024, 2025]
-
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL not set")
-
+DATABASE_URL = os.environ["DATABASE_URL"]
 conn = psycopg2.connect(DATABASE_URL)
 cur = conn.cursor()
 
-# -------------------------------------------------
+BASE = "https://f1api.dev/api"
+
+print("🚀 AUTO PIPELINE STARTED")
+
+# -------------------------
 # Helpers
-# -------------------------------------------------
-def safe_get(url):
+# -------------------------
+def to_int(val):
+    if val in (None, "-", "", "NC"):
+        return None
     try:
-        r = requests.get(url, timeout=20)
-        if r.status_code != 200:
-            print(f"❌ API failed: {url} → {r.status_code}")
-            return None
-        return r.json()
-    except Exception as e:
-        print(f"❌ Request error: {url} → {e}")
+        return int(val)
+    except:
         return None
 
 
-def race_needs_data(table, season, rnd):
-    cur.execute(
-        f"""
-        SELECT 1
-        FROM {table}
-        WHERE season = %s AND round = %s
-        LIMIT 1
-        """,
-        (season, rnd),
-    )
-    return cur.fetchone() is None
+def safe_get(url):
+    try:
+        r = requests.get(url, timeout=20)
+        if r.status_code == 429:
+            print(f"⏳ Rate limited: {url}")
+            time.sleep(8)
+            return None
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        print(f"❌ API failed: {url} → {e}")
+        return None
 
 
-def get_races():
-    cur.execute("""
-        SELECT race_id, season, round
-        FROM f1_races
-        ORDER BY season, round
-    """)
-    return cur.fetchall()
+# -------------------------
+# Get races needing data
+# -------------------------
+cur.execute("""
+SELECT season, round, race_id
+FROM f1_races
+ORDER BY season, round
+""")
 
-# -------------------------------------------------
+races = cur.fetchall()
+
+# -------------------------
 # FP IMPORT
-# -------------------------------------------------
+# -------------------------
 def import_fp(session, table):
     print(f"🏎️ Importing {session.upper()}")
-    rows = []
+    rows = 0
 
-    for race_id, season, rnd in get_races():
-        if not race_needs_data(table, season, rnd):
-            continue
-
-        url = f"{BASE_API}/{season}/{rnd}/{session}"
+    for season, rnd, race_id in races:
+        url = f"{BASE}/{season}/{rnd}/{session}"
         data = safe_get(url)
-        time.sleep(SLEEP_SECONDS)
-
         if not data or "races" not in data:
             continue
 
-        results_key = f"{session}Results"
-        results = data["races"].get(results_key)
-        if not results:
-            continue
-
+        key = f"{session}Results"
+        results = data["races"].get(key, [])
         for r in results:
-            rows.append((
+            cur.execute(f"""
+            INSERT INTO {table}
+            (season, round, race_id, driver_id, team_id, position, time)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT DO NOTHING
+            """, (
                 season,
                 rnd,
                 race_id,
                 r.get("driverId"),
                 r.get("teamId"),
-                r.get("time"),
+                to_int(r.get("fp1Id") or r.get("fp2Id") or r.get("fp3Id")),
+                r.get("time")
             ))
+            rows += 1
 
-    if rows:
-        execute_values(
-            cur,
-            f"""
-            INSERT INTO {table}
-            (season, round, race_id, driver_id, team_id, best_time)
-            VALUES %s
-            ON CONFLICT DO NOTHING
-            """,
-            rows,
-        )
-        conn.commit()
+    conn.commit()
+    print(f"✅ {table}: {rows} rows")
 
-    print(f"✅ {table}: {len(rows)} rows")
 
-# -------------------------------------------------
+# -------------------------
 # QUALIFYING
-# -------------------------------------------------
+# -------------------------
 def import_qualy():
     print("⏱️ Importing qualifying")
-    rows = []
+    rows = 0
 
-    for race_id, season, rnd in get_races():
-        if not race_needs_data("f1_qualifying_results", season, rnd):
-            continue
-
-        url = f"{BASE_API}/{season}/{rnd}/qualy"
+    for season, rnd, race_id in races:
+        url = f"{BASE}/{season}/{rnd}/qualy"
         data = safe_get(url)
-        time.sleep(SLEEP_SECONDS)
-
         if not data or "races" not in data:
             continue
 
-        results = data["races"].get("qualyResults")
-        if not results:
-            continue
-
+        results = data["races"].get("qualyResults", [])
         for r in results:
-            rows.append((
+            cur.execute("""
+            INSERT INTO f1_qualifying_results
+            (season, round, race_id, driver_id, team_id, position)
+            VALUES (%s,%s,%s,%s,%s,%s)
+            ON CONFLICT DO NOTHING
+            """, (
                 season,
                 rnd,
                 race_id,
                 r.get("driverId"),
                 r.get("teamId"),
-                r.get("q1"),
-                r.get("q2"),
-                r.get("q3"),
-                r.get("gridPosition"),
+                to_int(r.get("gridPosition"))
             ))
+            rows += 1
 
-    if rows:
-        execute_values(
-            cur,
-            """
-            INSERT INTO f1_qualifying_results
-            (season, round, race_id, driver_id, team_id, q1, q2, q3, grid_position)
-            VALUES %s
-            ON CONFLICT DO NOTHING
-            """,
-            rows,
-        )
-        conn.commit()
+    conn.commit()
+    print(f"✅ f1_qualifying_results: {rows} rows")
 
-    print(f"✅ f1_qualifying_results: {len(rows)} rows")
 
-# -------------------------------------------------
-# RACE RESULTS
-# -------------------------------------------------
-def import_race():
-    print("🏁 Importing race results")
-    rows = []
-
-    for race_id, season, rnd in get_races():
-        if not race_needs_data("f1_race_results", season, rnd):
-            continue
-
-        url = f"{BASE_API}/{season}/{rnd}/race"
-        data = safe_get(url)
-        time.sleep(SLEEP_SECONDS)
-
-        if not data or "races" not in data:
-            continue
-
-        results = data["races"].get("results")
-        if not results:
-            continue
-
-        for r in results:
-            rows.append((
-                season,
-                rnd,
-                race_id,
-                r["driver"]["driverId"],
-                r["team"]["teamId"],
-                r.get("position"),
-                r.get("points"),
-            ))
-
-    if rows:
-        execute_values(
-            cur,
-            """
-            INSERT INTO f1_race_results
-            (season, round, race_id, driver_id, team_id, position, points)
-            VALUES %s
-            ON CONFLICT DO NOTHING
-            """,
-            rows,
-        )
-        conn.commit()
-
-    print(f"✅ f1_race_results: {len(rows)} rows")
-
-# -------------------------------------------------
-# SPRINT QUALIFYING
-# -------------------------------------------------
+# -------------------------
+# SPRINT QUALY
+# -------------------------
 def import_sprint_qualy():
     print("⚡ Importing sprint qualifying")
-    rows = []
+    rows = 0
 
-    for race_id, season, rnd in get_races():
-        if not race_needs_data("f1_sprint_qualy_results", season, rnd):
-            continue
-
-        url = f"{BASE_API}/{season}/{rnd}/sprint/qualy"
+    for season, rnd, race_id in races:
+        url = f"{BASE}/{season}/{rnd}/sprint/qualy"
         data = safe_get(url)
-        time.sleep(SLEEP_SECONDS)
-
         if not data or "races" not in data:
             continue
 
-        results = data["races"].get("sprintQualyResults")
-        if not results:
-            continue
-
+        results = data["races"].get("sprintQualyResults", [])
         for r in results:
-            rows.append((
+            cur.execute("""
+            INSERT INTO f1_sprint_qualy_results
+            (season, round, race_id, driver_id, team_id, position)
+            VALUES (%s,%s,%s,%s,%s,%s)
+            ON CONFLICT DO NOTHING
+            """, (
                 season,
                 rnd,
                 race_id,
                 r.get("driverId"),
                 r.get("teamId"),
-                r.get("gridPosition"),
+                to_int(r.get("gridPosition"))
             ))
+            rows += 1
 
-    if rows:
-        execute_values(
-            cur,
-            """
-            INSERT INTO f1_sprint_qualy_results
-            (season, round, race_id, driver_id, team_id, grid_position)
-            VALUES %s
-            ON CONFLICT DO NOTHING
-            """,
-            rows,
-        )
-        conn.commit()
+    conn.commit()
+    print(f"✅ f1_sprint_qualy_results: {rows} rows")
 
-    print(f"✅ f1_sprint_qualy_results: {len(rows)} rows")
 
-# -------------------------------------------------
+# -------------------------
 # SPRINT RACE
-# -------------------------------------------------
+# -------------------------
 def import_sprint_race():
     print("🏁 Importing sprint race")
-    rows = []
+    rows = 0
 
-    for race_id, season, rnd in get_races():
-        if not race_needs_data("f1_sprint_race_results", season, rnd):
-            continue
-
-        url = f"{BASE_API}/{season}/{rnd}/sprint/race"
+    for season, rnd, race_id in races:
+        url = f"{BASE}/{season}/{rnd}/sprint/race"
         data = safe_get(url)
-        time.sleep(SLEEP_SECONDS)
-
         if not data or "races" not in data:
             continue
 
-        results = data["races"].get("sprintRaceResults")
-        if not results:
-            continue
-
+        results = data["races"].get("sprintRaceResults", [])
         for r in results:
-            rows.append((
+            cur.execute("""
+            INSERT INTO f1_sprint_race_results
+            (season, round, race_id, driver_id, team_id, position, points)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT DO NOTHING
+            """, (
                 season,
                 rnd,
                 race_id,
                 r.get("driverId"),
                 r.get("teamId"),
-                r.get("position"),
-                r.get("points"),
+                to_int(r.get("position")),
+                to_int(r.get("points"))
             ))
+            rows += 1
 
-    if rows:
-        execute_values(
-            cur,
-            """
-            INSERT INTO f1_sprint_race_results
+    conn.commit()
+    print(f"✅ f1_sprint_race_results: {rows} rows")
+
+
+# -------------------------
+# RACE
+# -------------------------
+def import_race():
+    print("🏆 Importing race results")
+    rows = 0
+
+    for season, rnd, race_id in races:
+        url = f"{BASE}/{season}/{rnd}/race"
+        data = safe_get(url)
+        if not data or "races" not in data:
+            continue
+
+        results = data["races"].get("results", [])
+        for r in results:
+            cur.execute("""
+            INSERT INTO f1_race_results
             (season, round, race_id, driver_id, team_id, position, points)
-            VALUES %s
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT DO NOTHING
-            """,
-            rows,
-        )
-        conn.commit()
+            """, (
+                season,
+                rnd,
+                race_id,
+                r.get("driverId"),
+                r.get("teamId"),
+                to_int(r.get("position")),
+                to_int(r.get("points"))
+            ))
+            rows += 1
 
-    print(f"✅ f1_sprint_race_results: {len(rows)} rows")
+    conn.commit()
+    print(f"✅ f1_race_results: {rows} rows")
 
-# -------------------------------------------------
-# RUN PIPELINE
-# -------------------------------------------------
+
+# -------------------------
+# RUN
+# -------------------------
 import_fp("fp1", "f1_fp1_results")
 import_fp("fp2", "f1_fp2_results")
 import_fp("fp3", "f1_fp3_results")
@@ -308,7 +233,5 @@ import_sprint_qualy()
 import_sprint_race()
 import_race()
 
-cur.close()
-conn.close()
-
 print("🎉 AUTO PIPELINE COMPLETE")
+conn.close()
