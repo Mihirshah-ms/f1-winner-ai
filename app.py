@@ -11,8 +11,22 @@ st.caption("Fully automated race & championship prediction")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 # ---------------- LOAD MODEL ----------------
-with open("model.pkl","rb") as f:
-    model = pickle.load(f)
+cur = conn.cursor()
+cur.execute("""
+SELECT model_blob
+FROM ml_models
+WHERE model_name = 'f1_winner_model'
+ORDER BY trained_at DESC
+LIMIT 1;
+""")
+
+row = cur.fetchone()
+
+if not row:
+    st.error("❌ Model not trained yet. Wait for cron run.")
+    st.stop()
+
+model = pickle.loads(row[0])
 
 # ---------------- DB ----------------
 conn = psycopg2.connect(DATABASE_URL)
