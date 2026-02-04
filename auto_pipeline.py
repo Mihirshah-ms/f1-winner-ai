@@ -41,45 +41,74 @@ def clean_time(t):
     return t.strip()
 
 # -----------------------------
-# Ensure tables
+# ENSURE TABLES
 # -----------------------------
 cur.execute("""
+-- FP1 (base table)
 CREATE TABLE IF NOT EXISTS f1_fp1_results (
-    season INT, round INT, race_id TEXT,
-    driver_id TEXT, team_id TEXT,
+    season INT,
+    round INT,
+    race_id TEXT,
+    driver_id TEXT,
+    team_id TEXT,
     position INT,
     best_time TEXT,
     UNIQUE(season, round, driver_id)
 );
-CREATE TABLE IF NOT EXISTS f1_fp2_results (LIKE f1_fp1_results INCLUDING ALL);
-CREATE TABLE IF NOT EXISTS f1_fp3_results (LIKE f1_fp1_results INCLUDING ALL);
 
+-- FP2 and FP3 inherit FP1 structure
+CREATE TABLE IF NOT EXISTS f1_fp2_results
+(LIKE f1_fp1_results INCLUDING ALL);
+
+CREATE TABLE IF NOT EXISTS f1_fp3_results
+(LIKE f1_fp1_results INCLUDING ALL);
+
+-- QUALIFYING
 CREATE TABLE IF NOT EXISTS f1_qualifying_results (
-    season INT, round INT, race_id TEXT,
-    driver_id TEXT, team_id TEXT,
+    season INT,
+    round INT,
+    race_id TEXT,
+    driver_id TEXT,
+    team_id TEXT,
     position INT,
-    q1_time TEXT, q2_time TEXT, q3_time TEXT,
+    q1 TEXT,
+    q2 TEXT,
+    q3 TEXT,
     UNIQUE(season, round, driver_id)
 );
 
+-- SPRINT QUALY
 CREATE TABLE IF NOT EXISTS f1_sprint_qualy_results (
-    season INT, round INT, race_id TEXT,
-    driver_id TEXT, team_id TEXT,
+    season INT,
+    round INT,
+    race_id TEXT,
+    driver_id TEXT,
+    team_id TEXT,
     position INT,
-    sq1 TEXT, sq2 TEXT, sq3 TEXT,
+    sq1 TEXT,
+    sq2 TEXT,
+    sq3 TEXT,
     UNIQUE(season, round, driver_id)
 );
 
+-- SPRINT RACE
 CREATE TABLE IF NOT EXISTS f1_sprint_race_results (
-    season INT, round INT, race_id TEXT,
-    driver_id TEXT, team_id TEXT,
+    season INT,
+    round INT,
+    race_id TEXT,
+    driver_id TEXT,
+    team_id TEXT,
     position INT,
     UNIQUE(season, round, driver_id)
 );
 
+-- RACE
 CREATE TABLE IF NOT EXISTS f1_race_results (
-    season INT, round INT, race_id TEXT,
-    driver_id TEXT, team_id TEXT,
+    season INT,
+    round INT,
+    race_id TEXT,
+    driver_id TEXT,
+    team_id TEXT,
     position INT,
     status TEXT,
     UNIQUE(season, round, driver_id)
