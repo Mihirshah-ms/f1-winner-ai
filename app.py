@@ -1,35 +1,31 @@
-import streamlit as st
-import psycopg2
 import os
-import pandas as pd
+import psycopg2
+from flask import Flask, render_template
 
-st.set_page_config(
-    page_title="F1 Analytics Platform",
-    page_icon="🏎️",
-    layout="wide"
-)
+# -----------------------------
+# Config
+# -----------------------------
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-st.title("🏎️ Formula 1 Analytics Platform")
+TARGET_SEASON = 2026
 
-# -------------------------------
-# Database connection
-# -------------------------------
-DATABASE_URL = os.getenv("DATABASE_URL")
+# -----------------------------
+# App & DB
+# -----------------------------
+app = Flask(__name__)
 
-@st.cache_resource
-def get_conn():
-    return psycopg2.connect(DATABASE_URL)
+conn = psycopg2.connect(DATABASE_URL)
+conn.autocommit = True
+cur = conn.cursor()
 
-conn = get_conn()
-
-# -------------------------------
-# Latest / Upcoming Race
-# -------------------------------
-st.subheader("🏁 Latest / Upcoming Race")
-
-try:
-    df_race = pd.read_sql(
-        """
+# -----------------------------
+# Helpers
+# -----------------------------
+def get_upcoming_race_2026():
+    """
+    Returns the next race in 2026 that has no race result yet
+    """
+    cur.execute("""
         SELECT
             r.season,
             r.round,
@@ -40,57 +36,70 @@ try:
             r.circuit_country
         FROM f1_races r
         LEFT JOIN f1_race_results rr
-            ON r.season = rr.season
-            AND r.round = rr.round
-        WHERE r.season = 2026
-        AND rr.season IS NULL
+          ON r.season = rr.season
+         AND r.round = rr.round
+        WHERE r.season = %s
+          AND rr.season IS NULL
         ORDER BY r.round ASC
         LIMIT 1;
-        """,
-        conn
+    """, (TARGET_SEASON,))
+
+    return cur.fetchone()
+
+
+def get_latest_completed_race_2026():
+    """
+    Returns latest completed race in 2026 (if any)
+    """
+    cur.execute("""
+        SELECT
+            r.season,
+            r.round,
+            r.race_name,
+            r.race_date,
+            r.circuit_name,
+            r.circuit_country
+        FROM f1_races r
+        JOIN f1_race_results rr
+          ON r.season = rr.season
+         AND r.round = rr.round
+        WHERE r.season = %s
+        ORDER BY r.round DESC
+        LIMIT 1;
+    """, (TARGET_SEASON,))
+
+    return cur.fetchone()
+
+# -----------------------------
+# Routes
+# -----------------------------
+@app.route("/")
+def home():
+    upcoming = get_upcoming_race_2026()
+    latest = get_latest_completed_race_2026()
+
+    # Debug visibility (Railway logs)
+    print("UPCOMING 2026 RACE:", upcoming)
+    print("LATEST COMPLETED 2026 RACE:", latest)
+
+    return render_template(
+        "index.html",
+        upcoming_race=upcoming,
+        latest_race=latest,
+        season=TARGET_SEASON
     )
 
-    if df_race.empty:
-        st.info("No race data available yet.")
-    else:
-        r = df_race.iloc[0]
 
-        col1, col2 = st.columns(2)
+# -----------------------------
+# Health Check
+# -----------------------------
+@app.route("/health")
+def health():
+    return {"status": "ok", "season": TARGET_SEASON}
 
-        with col1:
-            st.metric("Season", r["season"])
-            st.metric("Round", r["round"])
-            st.metric("Race", r["race_name"])
 
-        with col2:
-            st.metric("Date", r["race_date"] or "TBD")
-            st.metric("Time", r["race_time"] or "TBD")
-            st.metric("Circuit", r["circuit_name"])
-
-        st.caption(f"Country: {r['circuit_country']}")
-
-except Exception as e:
-    st.error("Failed to load race information.")
-    st.code(str(e))
-
-# -------------------------------
-# ML Model Status (lightweight)
-# -------------------------------
-st.subheader("🤖 ML Model Status")
-
-st.info(
-    """
-The prediction model will train automatically when:
-• Qualifying data exists  
-• Race results exist  
-• At least one race is completed  
-
-Until then, the platform stays live and stable.
-"""
-)
-
-# -------------------------------
-# Footer
-# -------------------------------
-st.markdown("---")
-st.caption("F1 Analytics Platform • Stable Mode • Dashboard Removed")
+# -----------------------------
+# Entry
+# -----------------------------
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
