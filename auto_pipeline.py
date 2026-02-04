@@ -61,7 +61,7 @@ def import_qualy():
 
     for season in SEASONS:
         for rnd in range(1, MAX_ROUNDS + 1):
-            if not race_missing(season, rnd, "qualy_date"):
+            if qualy_exists(season, rnd):
                 continue
 
             url = f"{BASE_URL}/{season}/{rnd}/qualy"
@@ -95,60 +95,8 @@ def import_qualy():
     print(f"✅ f1_qualifying_results: {len(rows)} rows")
 
 # -----------------------
-# RACE RESULTS
-# -----------------------
-def import_race():
-    print("🏆 Importing race results")
-
-    cur.execute("""
-        SELECT season, round, race_id
-        FROM f1_races
-        WHERE season IN (2024, 2025)
-        ORDER BY season, round
-    """)
-    races = cur.fetchall()
-
-    inserted = 0
-
-    for season, rnd, race_id in races:
-        url = f"{BASE_URL}/{season}/{rnd}/race"
-        data = fetch_json(url)
-        time.sleep(SLEEP_SECONDS)
-
-        if not data or "races" not in data:
-            continue
-
-        results = data["races"].get("results")
-        if not results:
-            continue
-
-        for r in results:
-            cur.execute("""
-                INSERT INTO f1_race_results
-                (season, round, race_id,
-                 driver_id, team_id,
-                 position, grid_position, points)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT DO NOTHING
-            """, (
-                season,
-                rnd,
-                race_id,
-                r["driver"]["driverId"],
-                r["team"]["teamId"],
-                safe_int(r.get("position")),
-                safe_int(r.get("grid")),
-                safe_int(r.get("points"))
-            ))
-            inserted += 1
-
-        conn.commit()
-
-    print(f"✅ Race result rows inserted: {inserted}")
-# -----------------------
 # PIPELINE RUN
 # -----------------------
 import_qualy()
-import_race()
 
 print("🎉 AUTO PIPELINE COMPLETE")
