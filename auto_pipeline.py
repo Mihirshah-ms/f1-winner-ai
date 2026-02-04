@@ -2,6 +2,7 @@ import os
 import psycopg2
 import pandas as pd
 import pickle
+import requests
 from datetime import datetime
 
 from sklearn.pipeline import Pipeline
@@ -12,15 +13,19 @@ from sklearn.linear_model import LogisticRegression
 # ---------------- CONFIG ----------------
 MODEL_NAME = "f1_winner_model"
 MIN_ROWS_REQUIRED = 50
-
-print("🚀 AUTO PIPELINE STARTED")
-# ---------------- IMPORT RACE RESULTS (SAFE) ----------------
-print("🏁 Importing race results")
-
-import requests
-
 API_BASE = "https://f1connectapi.vercel.app/api"
 
+print("🚀 AUTO PIPELINE STARTED")
+
+# ---------------- DB CONNECTION ----------------
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("❌ DATABASE_URL not set")
+
+conn = psycopg2.connect(DATABASE_URL)
+cur = conn.cursor()
+
+# ---------------- HELPERS ----------------
 def safe_position(pos):
     if pos in [None, "-", "NC", "DQ", "DNS", "DNF"]:
         return None
@@ -29,6 +34,7 @@ def safe_position(pos):
     except:
         return None
 
+# ---------------- ENSURE TABLE ----------------
 cur.execute("""
 CREATE TABLE IF NOT EXISTS f1_race_results (
     season INT,
@@ -42,18 +48,24 @@ CREATE TABLE IF NOT EXISTS f1_race_results (
 """)
 conn.commit()
 
+# ---------------- IMPORT RACE RESULTS ----------------
+print("🏁 Importing race results")
+
 for season in [2024, 2025]:
     print(f"📥 Fetching race results for {season}")
+    try:
+        resp = requests.get(f"{API_BASE}/{season}", timeout=20)
+        data = resp.json()
+    except Exception as e:
+        print(f"⚠️ Failed to fetch {season}: {e}")
+        continue
 
-    url = f"{API_BASE}/{season}"
-    data = requests.get(url).json()
     races = data.get("races", [])
-
     for race in races:
-        rnd = int(race["round"])
-        race_id = race["raceId"]
-
+        round_no = race.get("round")
+        race_id = race.get("raceId")
         results = race.get("results", [])
+
         if not results:
             continue
 
@@ -68,7 +80,7 @@ for season in [2024, 2025]:
             ON CONFLICT (season, round, driver_id) DO NOTHING;
             """, (
                 season,
-                rnd,
+                round_no,
                 race_id,
                 res.get("driverId"),
                 res.get("teamId"),
@@ -78,14 +90,6 @@ for season in [2024, 2025]:
 conn.commit()
 print("✅ Race results import complete")
 
-# ---------------- DB CONNECTION ----------------
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("❌ DATABASE_URL not set")
-
-conn = psycopg2.connect(DATABASE_URL)
-cur = conn.cursor()
-
 # ---------------- LOAD TRAINING DATA ----------------
 print("📥 Loading training data")
 
@@ -93,8 +97,8 @@ df = pd.read_sql("""
 SELECT
   q.driver_id,
   q.qualy_score,
-  d.avg_finish_5            AS avg_driver_form,
-  c.avg_team_finish_24      AS avg_team_strength,
+  d.avg_finish_5        AS avg_driver_form,
+  c.avg_team_finish_24  AS avg_team_strength,
   CASE WHEN r.position = 1 THEN 1 ELSE 0 END AS win
 FROM f1_qualifying_features q
 LEFT JOIN f1_race_results r
@@ -126,12 +130,9 @@ if len(df) < MIN_ROWS_REQUIRED:
 print(f"✅ Training rows available: {len(df)}")
 
 # ---------------- FEATURES / TARGET ----------------
-X = df[[
-    "qualy_score",
-    "avg_driver_form",
-    "avg_team_strength"
-]]
-
+X = df[
+    ["qualy_score", "avg_driver_form", "avg_team_strength"]
+]
 y = df["win"]
 
 # ---------------- ML PIPELINE ----------------
@@ -154,10 +155,9 @@ trained_at = datetime.utcnow()
 
 print(f"🎯 Training complete | Accuracy: {accuracy:.3f}")
 
-# ---------------- SERIALIZE MODEL ----------------
+# ---------------- STORE MODEL ----------------
 model_blob = pickle.dumps(pipeline)
 
-# ---------------- STORE MODEL ----------------
 cur.execute("""
 DELETE FROM ml_models
 WHERE model_name = %s;
@@ -165,7 +165,7 @@ WHERE model_name = %s;
 
 cur.execute("""
 INSERT INTO ml_models (model_name, model_blob, trained_at, accuracy)
-VALUES (%s, %s, %s, %s);
+VALUES (%s,%s,%s,%s);
 """, (
     MODEL_NAME,
     psycopg2.Binary(model_blob),
