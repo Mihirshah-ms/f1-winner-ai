@@ -53,44 +53,6 @@ def race_missing(season, rnd, col):
     return r is not None and r[0]
 
 # -----------------------
-# FP IMPORT
-# -----------------------
-def import_fp(session):
-    print(f"🏎️ Importing {session.upper()}")
-    table = f"f1_{session}_results"
-    rows = []
-
-    for season in SEASONS:
-        for rnd in range(1, MAX_ROUNDS + 1):
-            url = f"{BASE_URL}/{season}/{rnd}/{session}"
-            data = fetch_json(url)
-            time.sleep(SLEEP_SECONDS)
-            if not data or "races" not in data:
-                continue
-
-            key = f"{session}Results"
-            results = data["races"].get(key, [])
-            for r in results:
-                rows.append((
-                    season,
-                    rnd,
-                    data["races"]["raceId"],
-                    r.get("driverId"),
-                    r.get("teamId"),
-                    r.get("time")
-                ))
-
-    if rows:
-        execute_batch(cur, f"""
-            INSERT INTO {table}
-            (season, round, race_id, driver_id, team_id, best_time)
-            VALUES (%s,%s,%s,%s,%s,%s)
-            ON CONFLICT DO NOTHING
-        """, rows)
-
-    print(f"✅ {table}: {len(rows)} rows")
-
-# -----------------------
 # QUALIFYING
 # -----------------------
 def import_qualy():
