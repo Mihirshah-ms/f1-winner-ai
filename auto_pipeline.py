@@ -55,6 +55,15 @@ def race_missing(season, rnd, col):
 # -----------------------
 # QUALIFYING
 # -----------------------
+def qualy_exists(season, rnd):
+    cur.execute("""
+        SELECT 1
+        FROM f1_qualifying_results
+        WHERE season = %s AND round = %s
+        LIMIT 1
+    """, (season, rnd))
+    return cur.fetchone() is not None
+    
 def import_qualy():
     print("⏱️ Importing qualifying")
     rows = []
