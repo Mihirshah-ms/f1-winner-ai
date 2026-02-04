@@ -99,42 +99,52 @@ def import_qualy():
 # -----------------------
 def import_race():
     print("🏆 Importing race results")
-    rows = []
 
-    for season in SEASONS:
-        for rnd in range(1, MAX_ROUNDS + 1):
-            if not race_missing(season, rnd, "winner_driver_id"):
-                continue
+    cur.execute("""
+        SELECT season, round, race_id
+        FROM f1_races
+        WHERE season IN (2024, 2025)
+        ORDER BY season, round
+    """)
+    races = cur.fetchall()
 
-            url = f"{BASE_URL}/{season}/{rnd}/race"
-            data = fetch_json(url)
-            time.sleep(SLEEP_SECONDS)
-            if not data or "races" not in data:
-                continue
+    inserted = 0
 
-            race = data["races"]
-            for r in race.get("results", []):
-                rows.append((
-                    season,
-                    rnd,
-                    race["raceId"],
-                    r["driver"]["driverId"],
-                    r["team"]["teamId"],
-                    safe_int(r.get("position")),
-                    safe_int(r.get("grid")),
-                    safe_int(r.get("points"))
-                ))
+    for season, rnd, race_id in races:
+        url = f"{BASE}/{season}/{rnd}/race"
+        data = fetch_json(url)
+        time.sleep(RATE_SLEEP)
 
-    if rows:
-        execute_batch(cur, """
-            INSERT INTO f1_race_results
-            (season, round, race_id, driver_id, team_id, position, grid_position, points)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT DO NOTHING
-        """, rows)
+        if not data or "races" not in data:
+            continue
 
-    print(f"✅ f1_race_results: {len(rows)} rows")
+        results = data["races"].get("results")
+        if not results:
+            continue
 
+        for r in results:
+            cur.execute("""
+                INSERT INTO f1_race_results
+                (season, round, race_id,
+                 driver_id, team_id,
+                 position, grid_position, points)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT DO NOTHING
+            """, (
+                season,
+                rnd,
+                race_id,
+                r["driver"]["driverId"],
+                r["team"]["teamId"],
+                safe_int(r.get("position")),
+                safe_int(r.get("grid")),
+                safe_int(r.get("points"))
+            ))
+            inserted += 1
+
+        conn.commit()
+
+    print(f"✅ Race result rows inserted: {inserted}")
 # -----------------------
 # PIPELINE RUN
 # -----------------------
