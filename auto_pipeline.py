@@ -10,15 +10,15 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 
 # ---------------- CONFIG ----------------
-MIN_ROWS_REQUIRED = 50
 MODEL_NAME = "f1_winner_model"
+MIN_ROWS_REQUIRED = 50
 
 print("🚀 AUTO PIPELINE STARTED")
 
 # ---------------- DB CONNECTION ----------------
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL not set")
+    raise RuntimeError("❌ DATABASE_URL not set")
 
 conn = psycopg2.connect(DATABASE_URL)
 cur = conn.cursor()
@@ -30,8 +30,8 @@ df = pd.read_sql("""
 SELECT
   q.driver_id,
   q.qualy_score,
-  COALESCE(d.avg_finish_5, NULL) AS avg_driver_form,
-  COALESCE(c.avg_team_finish_24, NULL) AS avg_team_strength,
+  d.avg_finish_5            AS avg_driver_form,
+  c.avg_team_finish_24      AS avg_team_strength,
   CASE WHEN r.position = 1 THEN 1 ELSE 0 END AS win
 FROM f1_qualifying_features q
 LEFT JOIN f1_race_results r
@@ -43,9 +43,9 @@ LEFT JOIN f1_driver_recent_form d
  AND q.round = d.round
  AND q.driver_id = d.driver_id
 LEFT JOIN f1_constructor_strength c
-  ON q.season = c.season
- AND q.round = c.round
- AND q.team_id = c.team_id
+  ON r.season = c.season
+ AND r.round = c.round
+ AND r.team_id = c.team_id
 WHERE r.position IS NOT NULL;
 """, conn)
 
@@ -63,7 +63,12 @@ if len(df) < MIN_ROWS_REQUIRED:
 print(f"✅ Training rows available: {len(df)}")
 
 # ---------------- FEATURES / TARGET ----------------
-X = df[["qualy_score", "avg_driver_form", "avg_team_strength"]]
+X = df[[
+    "qualy_score",
+    "avg_driver_form",
+    "avg_team_strength"
+]]
+
 y = df["win"]
 
 # ---------------- ML PIPELINE ----------------
@@ -71,7 +76,7 @@ pipeline = Pipeline([
     ("imputer", SimpleImputer(strategy="median")),
     ("scaler", StandardScaler()),
     ("model", LogisticRegression(
-        max_iter=200,
+        max_iter=300,
         class_weight="balanced",
         n_jobs=1
     ))
