@@ -77,7 +77,8 @@ def import_fp(session, table):
                 ))
 
     if not rows:
-        raise RuntimeError(f"❌ No rows parsed for {session}")
+        print(f"⚠️ No data found for {session.upper()} (this is normal for some weekends)")
+        return
 
     execute_batch(cur, f"""
         INSERT INTO {table} (season, round, driver_id, team_id, best_time)
