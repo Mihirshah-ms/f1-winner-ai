@@ -111,7 +111,7 @@ def import_race():
     inserted = 0
 
     for season, rnd, race_id in races:
-        url = f"{BASE}/{season}/{rnd}/race"
+        url = f"{BASE_URL}/{season}/{rnd}/race"
         data = fetch_json(url)
         time.sleep(RATE_SLEEP)
 
