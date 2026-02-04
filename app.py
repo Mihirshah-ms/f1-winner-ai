@@ -31,15 +31,20 @@ try:
     df_race = pd.read_sql(
         """
         SELECT
-            season,
-            round,
-            race_name,
-            race_date,
-            race_time,
-            circuit_name,
-            circuit_country
-        FROM f1_races
-        ORDER BY season DESC, round DESC
+            r.season,
+            r.round,
+            r.race_name,
+            r.race_date,
+            r.race_time,
+            r.circuit_name,
+            r.circuit_country
+        FROM f1_races r
+        LEFT JOIN f1_race_results rr
+            ON r.season = rr.season
+            AND r.round = rr.round
+        WHERE r.season = 2026
+        AND rr.season IS NULL
+        ORDER BY r.round ASC
         LIMIT 1;
         """,
         conn
