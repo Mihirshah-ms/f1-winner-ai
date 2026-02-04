@@ -181,7 +181,8 @@ def import_race():
                 ))
 
     if not rows:
-        raise RuntimeError("❌ No race rows parsed")
+        print("⚠️ No race results available yet — skipping")
+        return
 
     execute_batch(cur, """
         INSERT INTO f1_race_results
