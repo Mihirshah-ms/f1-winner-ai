@@ -4,3 +4,4 @@ psycopg2-binary
 requests
 scikit-learn
 numpy
+python-dotenv
