@@ -1,31 +1,40 @@
-import os
+import streamlit as st
 import psycopg2
-from flask import Flask, render_template
+import pandas as pd
 
-# -----------------------------
-# Config
-# -----------------------------
-DATABASE_URL = os.environ.get("DATABASE_URL")
+# ----------------------------------------------------
+# Page config
+# ----------------------------------------------------
+st.set_page_config(
+    page_title="F1 Winner AI",
+    layout="wide"
+)
 
-TARGET_SEASON = 2026
+st.title("🏎️ F1 Winner AI")
+st.caption("Read-only analytics • 2026 live season")
 
-# -----------------------------
-# App & DB
-# -----------------------------
-app = Flask(__name__)
+# ----------------------------------------------------
+# Database connection (cached)
+# ----------------------------------------------------
+@st.cache_resource
+def get_conn():
+    return psycopg2.connect(
+        host=st.secrets["DB_HOST"],
+        port=st.secrets["DB_PORT"],
+        dbname=st.secrets["DB_NAME"],
+        user=st.secrets["DB_USER"],
+        password=st.secrets["DB_PASSWORD"],
+        sslmode="require"
+    )
 
-conn = psycopg2.connect(DATABASE_URL)
-conn.autocommit = True
-cur = conn.cursor()
+conn = get_conn()
 
-# -----------------------------
-# Helpers
-# -----------------------------
-def get_upcoming_race_2026():
-    """
-    Returns the next race in 2026 that has no race result yet
-    """
-    cur.execute("""
+# ----------------------------------------------------
+# Helper queries (lightweight, safe)
+# ----------------------------------------------------
+@st.cache_data(ttl=300)
+def get_upcoming_2026_race():
+    query = """
         SELECT
             r.season,
             r.round,
@@ -38,68 +47,82 @@ def get_upcoming_race_2026():
         LEFT JOIN f1_race_results rr
           ON r.season = rr.season
          AND r.round = rr.round
-        WHERE r.season = %s
+        WHERE r.season = 2026
           AND rr.season IS NULL
         ORDER BY r.round ASC
         LIMIT 1;
-    """, (TARGET_SEASON,))
-
-    return cur.fetchone()
-
-
-def get_latest_completed_race_2026():
     """
-    Returns latest completed race in 2026 (if any)
-    """
-    cur.execute("""
+    return pd.read_sql(query, conn)
+
+@st.cache_data(ttl=300)
+def get_recent_results():
+    query = """
         SELECT
-            r.season,
-            r.round,
-            r.race_name,
-            r.race_date,
-            r.circuit_name,
-            r.circuit_country
-        FROM f1_races r
-        JOIN f1_race_results rr
-          ON r.season = rr.season
-         AND r.round = rr.round
-        WHERE r.season = %s
-        ORDER BY r.round DESC
-        LIMIT 1;
-    """, (TARGET_SEASON,))
+            season,
+            round,
+            race_name,
+            race_date
+        FROM f1_races
+        WHERE season >= 2024
+        ORDER BY season DESC, round DESC
+        LIMIT 10;
+    """
+    return pd.read_sql(query, conn)
 
-    return cur.fetchone()
+# ----------------------------------------------------
+# UI sections
+# ----------------------------------------------------
+st.subheader("🏁 Upcoming Race (2026)")
 
-# -----------------------------
-# Routes
-# -----------------------------
-@app.route("/")
-def home():
-    upcoming = get_upcoming_race_2026()
-    latest = get_latest_completed_race_2026()
+upcoming = get_upcoming_2026_race()
 
-    # Debug visibility (Railway logs)
-    print("UPCOMING 2026 RACE:", upcoming)
-    print("LATEST COMPLETED 2026 RACE:", latest)
+if upcoming.empty:
+    st.info("No upcoming 2026 races found yet.")
+else:
+    r = upcoming.iloc[0]
 
-    return render_template(
-        "index.html",
-        upcoming_race=upcoming,
-        latest_race=latest,
-        season=TARGET_SEASON
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Season", r["season"])
+        st.metric("Round", r["round"])
+
+    with col2:
+        st.metric("Race", r["race_name"])
+        st.metric("Circuit", r["circuit_name"])
+
+    with col3:
+        st.metric("Country", r["circuit_country"])
+        st.metric("Race Date", str(r["race_date"]))
+
+# ----------------------------------------------------
+st.divider()
+
+st.subheader("📊 Recent Races (Read-only)")
+
+recent = get_recent_results()
+
+if recent.empty:
+    st.warning("No race data available.")
+else:
+    st.dataframe(
+        recent,
+        use_container_width=True,
+        hide_index=True
     )
 
+# ----------------------------------------------------
+st.divider()
 
-# -----------------------------
-# Health Check
-# -----------------------------
-@app.route("/health")
-def health():
-    return {"status": "ok", "season": TARGET_SEASON}
+st.subheader("🤖 ML Model Status")
 
+st.info(
+    "Model training is handled by the auto-pipeline.\n\n"
+    "Training activates automatically once:\n"
+    "• Qualifying exists\n"
+    "• Race results exist\n"
+    "• At least one 2026 race is completed"
+)
 
-# -----------------------------
-# Entry
-# -----------------------------
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+# ----------------------------------------------------
+st.caption("F1 Analytics Platform • Streamlit Cloud • Safe Mode Enabled")
