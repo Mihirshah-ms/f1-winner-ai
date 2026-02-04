@@ -182,8 +182,22 @@ pipeline = Pipeline([
 pipeline.fit(X, y)
 acc = accuracy_score(y, pipeline.predict(X))
 
-with open("model.pkl", "wb") as f:
-    pickle.dump(pipeline, f)
+model_bytes = pickle.dumps(pipeline)
+
+cur.execute("""
+INSERT INTO ml_models (model_name, model_blob, trained_at, accuracy)
+VALUES (%s, %s, %s, %s)
+ON CONFLICT (model_name)
+DO UPDATE SET
+  model_blob = EXCLUDED.model_blob,
+  trained_at = EXCLUDED.trained_at,
+  accuracy = EXCLUDED.accuracy;
+""", (
+    "f1_winner_model",
+    psycopg2.Binary(model_bytes),
+    datetime.utcnow(),
+    acc
+))
 
 cur.execute("""
 INSERT INTO model_logs (run_time, accuracy)
