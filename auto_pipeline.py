@@ -138,9 +138,6 @@ def import_race():
 # -----------------------
 # PIPELINE RUN
 # -----------------------
-import_fp("fp1")
-import_fp("fp2")
-import_fp("fp3")
 import_qualy()
 import_race()
 
