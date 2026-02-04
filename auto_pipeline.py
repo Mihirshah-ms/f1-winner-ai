@@ -97,7 +97,14 @@ for season, rnd, race_id in cur.fetchall():
 # ---------------- RACE RESULTS ----------------
 cur.execute("DELETE FROM f1_race_results;")
 
-for season, rnd, race_id in cur.execute("SELECT season, round, race_id FROM f1_races;"):
+cur.execute("SELECT season, round, race_id FROM f1_races;")
+rows = cur.fetchall()
+
+if not rows:
+    raise RuntimeError("❌ No races found in f1_races table")
+
+for season, rnd, race_id in rows:
+
     try:
         r = fetch_json(f"{API_BASE}/{season}/{rnd}/race")
         for res in r.get("races", {}).get("results", []):
