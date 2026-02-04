@@ -1,176 +1,221 @@
 import os
 import requests
 import psycopg2
-import pandas as pd
-import pickle
+import json
 from datetime import datetime
 
 print("🚀 AUTO PIPELINE STARTED")
 
-# =========================
-# DATABASE CONNECTION
-# =========================
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
-    raise RuntimeError("❌ DATABASE_URL not set")
+    raise RuntimeError("DATABASE_URL not set")
 
 conn = psycopg2.connect(DATABASE_URL)
 cur = conn.cursor()
 
-# =========================
-# HELPERS
-# =========================
-def safe_int(val):
-    try:
-        return int(val)
-    except:
-        return None
+BASE_URL = "https://f1connectapi.vercel.app/api"
 
-def fetch_json(url):
+SEASONS = [2024, 2025]   # backfill all
+MAX_ROUNDS = 30          # safe upper bound
+
+# -----------------------------
+# Helpers
+# -----------------------------
+def safe_get(url):
     try:
         r = requests.get(url, timeout=15)
-        if r.status_code != 200:
-            return None
-        return r.json()
-    except:
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return None
+
+def parse_time(t):
+    if not t or t in ["-", "NC", "DNF"]:
         return None
+    return t
 
-# =========================
-# STEP 1: IMPORT RACE RESULTS
-# =========================
+def ensure_tables():
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS f1_fp1_results (
+        season INT, round INT, race_id TEXT,
+        driver_id TEXT, team_id TEXT,
+        position INT,
+        best_lap_time TEXT,
+        laps JSONB,
+        UNIQUE(season, round, driver_id)
+    );
+    CREATE TABLE IF NOT EXISTS f1_fp2_results (LIKE f1_fp1_results INCLUDING ALL);
+    CREATE TABLE IF NOT EXISTS f1_fp3_results (LIKE f1_fp1_results INCLUDING ALL);
+
+    CREATE TABLE IF NOT EXISTS f1_qualifying_results (
+        season INT, round INT, race_id TEXT,
+        driver_id TEXT, team_id TEXT,
+        position INT,
+        q1_time TEXT, q2_time TEXT, q3_time TEXT,
+        UNIQUE(season, round, driver_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS f1_sprint_qualy_results (
+        season INT, round INT, race_id TEXT,
+        driver_id TEXT, team_id TEXT,
+        position INT,
+        time TEXT,
+        UNIQUE(season, round, driver_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS f1_sprint_race_results (
+        season INT, round INT, race_id TEXT,
+        driver_id TEXT, team_id TEXT,
+        position INT,
+        status TEXT,
+        UNIQUE(season, round, driver_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS f1_race_results (
+        season INT, round INT, race_id TEXT,
+        driver_id TEXT, team_id TEXT,
+        position INT,
+        status TEXT,
+        UNIQUE(season, round, driver_id)
+    );
+    """)
+    conn.commit()
+
+ensure_tables()
+
+# -----------------------------
+# Generic session importer
+# -----------------------------
+def import_fp(session, table):
+    for season in SEASONS:
+        for rnd in range(1, MAX_ROUNDS + 1):
+            url = f"{BASE_URL}/{season}/{rnd}/{session}"
+            data = safe_get(url)
+            if not data or "races" not in data:
+                continue
+
+            race = data["races"]
+            race_id = race.get("raceId")
+
+            for res in race.get("results", []):
+                cur.execute(f"""
+                INSERT INTO {table} VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT DO NOTHING
+                """, (
+                    season,
+                    rnd,
+                    race_id,
+                    res.get("driverId"),
+                    res.get("teamId"),
+                    res.get("position"),
+                    parse_time(res.get("bestLapTime")),
+                    json.dumps(res.get("laps", []))
+                ))
+            conn.commit()
+
+def import_qualy():
+    for season in SEASONS:
+        for rnd in range(1, MAX_ROUNDS + 1):
+            url = f"{BASE_URL}/{season}/{rnd}/qualy"
+            data = safe_get(url)
+            if not data or "races" not in data:
+                continue
+
+            race = data["races"]
+            race_id = race.get("raceId")
+
+            for res in race.get("qualyResults", []):
+                cur.execute("""
+                INSERT INTO f1_qualifying_results VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT DO NOTHING
+                """, (
+                    season,
+                    rnd,
+                    race_id,
+                    res.get("driverId"),
+                    res.get("teamId"),
+                    res.get("gridPosition"),
+                    parse_time(res.get("q1")),
+                    parse_time(res.get("q2")),
+                    parse_time(res.get("q3")),
+                ))
+            conn.commit()
+
+def import_sprint():
+    for season in SEASONS:
+        for rnd in range(1, MAX_ROUNDS + 1):
+            for kind, table in [
+                ("sprint/qualy", "f1_sprint_qualy_results"),
+                ("sprint/race", "f1_sprint_race_results"),
+            ]:
+                url = f"{BASE_URL}/{season}/{rnd}/{kind}"
+                data = safe_get(url)
+                if not data or "races" not in data:
+                    continue
+
+                race = data["races"]
+                race_id = race.get("raceId")
+
+                for res in race.get("results", []):
+                    cur.execute(f"""
+                    INSERT INTO {table} VALUES (%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT DO NOTHING
+                    """, (
+                        season,
+                        rnd,
+                        race_id,
+                        res.get("driverId"),
+                        res.get("teamId"),
+                        res.get("position"),
+                        res.get("status")
+                    ))
+                conn.commit()
+
+def import_race():
+    for season in SEASONS:
+        for rnd in range(1, MAX_ROUNDS + 1):
+            url = f"{BASE_URL}/{season}/{rnd}/race"
+            data = safe_get(url)
+            if not data or "races" not in data:
+                continue
+
+            race = data["races"]
+            race_id = race.get("raceId")
+
+            for res in race.get("results", []):
+                cur.execute("""
+                INSERT INTO f1_race_results VALUES (%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT DO NOTHING
+                """, (
+                    season,
+                    rnd,
+                    race_id,
+                    res.get("driverId"),
+                    res.get("teamId"),
+                    res.get("position"),
+                    res.get("status")
+                ))
+            conn.commit()
+
+# -----------------------------
+# RUN IMPORTS
+# -----------------------------
+print("🏎️ Importing FP sessions")
+import_fp("fp1", "f1_fp1_results")
+import_fp("fp2", "f1_fp2_results")
+import_fp("fp3", "f1_fp3_results")
+
+print("⏱️ Importing qualifying")
+import_qualy()
+
+print("⚡ Importing sprint sessions")
+import_sprint()
+
 print("🏁 Importing race results")
-inserted_races = 0
+import_race()
 
-for season in [2024, 2025]:
-    print(f"📥 Fetching race results for {season}")
-    data = fetch_json(f"https://f1api.dev/api/{season}")
-
-    if not data or "races" not in data:
-        print(f"❌ Failed to fetch results for {season}")
-        continue
-
-    for race in data["races"]:
-        race_id = race.get("raceId")
-        rnd = safe_int(race.get("round"))
-
-        results = race.get("results", [])
-        if not results:
-            continue
-
-        for res in results:
-            position = safe_int(res.get("position"))
-            driver_id = res.get("driverId")
-            team_id = res.get("teamId")
-            status = res.get("status")
-
-            cur.execute("""
-                INSERT INTO f1_race_results
-                (season, round, race_id, driver_id, team_id, position, status)
-                VALUES (%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT DO NOTHING
-            """, (
-                season, rnd, race_id,
-                driver_id, team_id,
-                position, status
-            ))
-            inserted_races += 1
-
-conn.commit()
-print(f"✅ Race results import complete ({inserted_races} rows)")
-
-# =========================
-# STEP 2: IMPORT QUALIFYING
-# =========================
-print("🏎️ Importing qualifying results")
-inserted_qualy = 0
-
-for season in [2024, 2025]:
-    print(f"📥 Fetching qualifying for {season}")
-    data = fetch_json(f"https://f1api.dev/api/{season}")
-
-    if not data or "races" not in data:
-        print(f"❌ Failed to fetch qualifying for {season}")
-        continue
-
-    for race in data["races"]:
-        race_id = race.get("raceId")
-        rnd = safe_int(race.get("round"))
-        qualy = race.get("qualifyingResults", [])
-
-        for q in qualy:
-            cur.execute("""
-                INSERT INTO f1_qualifying_results
-                (season, round, race_id, driver_id, team_id, position, q1_time, q2_time, q3_time)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT DO NOTHING
-            """, (
-                season, rnd, race_id,
-                q.get("driverId"),
-                q.get("teamId"),
-                safe_int(q.get("position")),
-                q.get("q1"),
-                q.get("q2"),
-                q.get("q3")
-            ))
-            inserted_qualy += 1
-
-conn.commit()
-print(f"✅ Qualifying import complete ({inserted_qualy} rows)")
-
-# =========================
-# STEP 3: LOAD TRAINING DATA
-# =========================
-print("📥 Loading training data")
-
-df = pd.read_sql("""
-SELECT
-  q.driver_id,
-  q.qualy_score,
-  d.avg_finish_5 AS driver_form,
-  c.avg_team_finish_24 AS team_strength,
-  CASE WHEN r.position = 1 THEN 1 ELSE 0 END AS win
-FROM f1_qualifying_features q
-JOIN f1_race_results r
-  ON q.season = r.season AND q.round = r.round AND q.driver_id = r.driver_id
-LEFT JOIN f1_driver_recent_form d
-  ON q.season = d.season AND q.round = d.round AND q.driver_id = d.driver_id
-LEFT JOIN f1_constructor_strength c
-  ON q.season = c.season AND q.round = c.round AND r.team_id = c.team_id
-WHERE r.position IS NOT NULL
-""", conn)
-
-if df.empty:
-    print("⚠️ No training data available yet. Skipping training.")
-    conn.close()
-    exit(0)
-
-# =========================
-# STEP 4: TRAIN MODEL
-# =========================
-print("🤖 Training model")
-
-from sklearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer
-from sklearn.ensemble import GradientBoostingClassifier
-
-X = df[["qualy_score", "driver_form", "team_strength"]]
-y = df["win"]
-
-pipeline = Pipeline([
-    ("imputer", SimpleImputer(strategy="median")),
-    ("model", GradientBoostingClassifier(
-        n_estimators=300,
-        learning_rate=0.05,
-        max_depth=4,
-        random_state=42
-    ))
-])
-
-pipeline.fit(X, y)
-
-with open("model.pkl", "wb") as f:
-    pickle.dump(pipeline, f)
-
-print("✅ Model trained and saved (model.pkl)")
+cur.close()
 conn.close()
-print("🎯 AUTO PIPELINE COMPLETE")
+
+print("✅ AUTO PIPELINE COMPLETE")
