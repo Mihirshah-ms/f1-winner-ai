@@ -83,6 +83,74 @@ rows_2025 = import_race_results(2025)
 
 print(f"✅ Race results import complete ({rows_2024 + rows_2025} rows)")
 
+print("🏎️ Importing qualifying results")
+
+import requests
+
+def safe_time(t):
+    if t in [None, "-", "", "N/A"]:
+        return None
+    return t
+
+seasons = [2024, 2025]
+
+for season in seasons:
+    print(f"📥 Fetching qualifying for {season}")
+
+    races = cur.execute(
+        "SELECT round, race_id FROM f1_races WHERE season = %s;",
+        (season,)
+    ).fetchall()
+
+    for rnd, race_id in races:
+        url = f"https://f1connectapi.vercel.app/api/{season}/{rnd}/qualy"
+        r = requests.get(url, timeout=10)
+
+        if r.status_code != 200:
+            continue
+
+        data = r.json()
+        race = data.get("races")
+
+        if not race or "qualyResults" not in race:
+            continue
+
+        for res in race["qualyResults"]:
+            driver_id = res.get("driverId")
+            team_id = res.get("teamId")
+            pos_raw = res.get("gridPosition")
+
+            position = (
+                None if pos_raw in [None, "-", "NC", "DQ", "R"]
+                else int(pos_raw)
+            )
+
+            q1 = safe_time(res.get("q1"))
+            q2 = safe_time(res.get("q2"))
+            q3 = safe_time(res.get("q3"))
+
+            cur.execute("""
+            INSERT INTO f1_qualifying_results (
+                season, round, race_id,
+                driver_id, team_id,
+                position, q1_time, q2_time, q3_time
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (season, round, driver_id)
+            DO UPDATE SET
+                position = EXCLUDED.position,
+                q1_time = EXCLUDED.q1_time,
+                q2_time = EXCLUDED.q2_time,
+                q3_time = EXCLUDED.q3_time;
+            """, (
+                season, rnd, race_id,
+                driver_id, team_id,
+                position, q1, q2, q3
+            ))
+
+conn.commit()
+print("✅ Qualifying import complete")
+
 # =========================
 # STEP 2: LOAD TRAINING DATA
 # =========================
