@@ -1,27 +1,20 @@
-import os
-import psycopg2
-import pandas as pd
 import streamlit as st
-from datetime import datetime
+import psycopg2
+import os
+import pandas as pd
 
-# -----------------------------
-# Page Config
-# -----------------------------
 st.set_page_config(
-    page_title="F1 Data Health & Predictions",
-    layout="wide",
+    page_title="F1 Analytics Platform",
+    page_icon="🏎️",
+    layout="wide"
 )
 
-st.title("🏎️ Formula 1 Data Health Dashboard")
+st.title("🏎️ Formula 1 Analytics Platform")
 
-# -----------------------------
-# Database Connection
-# -----------------------------
+# -------------------------------
+# Database connection
+# -------------------------------
 DATABASE_URL = os.getenv("DATABASE_URL")
-
-if not DATABASE_URL:
-    st.error("DATABASE_URL not set")
-    st.stop()
 
 @st.cache_resource
 def get_conn():
@@ -29,151 +22,70 @@ def get_conn():
 
 conn = get_conn()
 
-# -----------------------------
-# Helpers
-# -----------------------------
-def load_df(query):
-    try:
-        return pd.read_sql(query, conn)
-    except Exception as e:
-        st.error(str(e))
-        return pd.DataFrame()
+# -------------------------------
+# Latest / Upcoming Race
+# -------------------------------
+st.subheader("🏁 Latest / Upcoming Race")
 
-def bool_icon(val):
-    return "✅" if val else "❌"
+try:
+    df_race = pd.read_sql(
+        """
+        SELECT
+            season,
+            round,
+            race_name,
+            race_date,
+            race_time,
+            circuit_name,
+            circuit_country
+        FROM f1_races
+        ORDER BY season DESC, round DESC
+        LIMIT 1;
+        """,
+        conn
+    )
 
-# -----------------------------
-# Season Status
-# -----------------------------
-st.header("📅 Season Completion Status")
+    if df_race.empty:
+        st.info("No race data available yet.")
+    else:
+        r = df_race.iloc[0]
 
-season_status = load_df("""
-SELECT
-    season,
-    total_races,
-    completed_races,
-    pending_races,
-    season_complete
-FROM f1_season_status
-ORDER BY season;
-""")
+        col1, col2 = st.columns(2)
 
-if season_status.empty:
-    st.warning("No season data available yet.")
-else:
-    season_status_display = season_status.copy()
-    season_status_display["season_complete"] = season_status_display["season_complete"].apply(bool_icon)
-    st.dataframe(season_status_display, use_container_width=True)
+        with col1:
+            st.metric("Season", r["season"])
+            st.metric("Round", r["round"])
+            st.metric("Race", r["race_name"])
 
-# -----------------------------
-# Data Health per Race
-# -----------------------------
-st.header("🩺 Race Data Health")
+        with col2:
+            st.metric("Date", r["race_date"] or "TBD")
+            st.metric("Time", r["race_time"] or "TBD")
+            st.metric("Circuit", r["circuit_name"])
 
-health_df = load_df("""
-SELECT
-    season,
-    round,
-    race_name,
-    race_date,
-    has_fp1,
-    has_fp2,
-    has_fp3,
-    has_qualy,
-    has_race,
-    has_sprint_qualy,
-    has_sprint_race
-FROM f1_data_health
-ORDER BY season DESC, round DESC;
-""")
+        st.caption(f"Country: {r['circuit_country']}")
 
-if health_df.empty:
-    st.warning("No race health data available.")
-else:
-    display_df = health_df.copy()
+except Exception as e:
+    st.error("Failed to load race information.")
+    st.code(str(e))
 
-    for col in [
-        "has_fp1", "has_fp2", "has_fp3",
-        "has_qualy", "has_race",
-        "has_sprint_qualy", "has_sprint_race"
-    ]:
-        display_df[col] = display_df[col].apply(bool_icon)
-
-    display_df["race_date"] = pd.to_datetime(
-        display_df["race_date"], errors="coerce"
-    ).dt.strftime("%d %B %Y")
-
-    st.dataframe(display_df, use_container_width=True)
-
-# -----------------------------
-# Upcoming / Latest Race
-# -----------------------------
-st.header("🏁 Latest / Upcoming Race")
-
-race_info = load_df("""
-SELECT
-    season,
-    round,
-    race_name,
-    race_date,
-    race_time,
-    circuit_name,
-    circuit_country
-FROM f1_races
-ORDER BY season DESC, round DESC
-LIMIT 1;
-""")
-
-if race_info.empty:
-    st.warning("No race information available.")
-else:
-    race = race_info.iloc[0]
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.metric("Season", int(race["season"]))
-        st.metric("Round", int(race["round"]))
-
-    with col2:
-        date_str = (
-            pd.to_datetime(race["race_date"], errors="coerce")
-            .strftime("%d %B %Y")
-            if race["race_date"] else "TBD"
-        )
-        st.metric("Race Date", date_str)
-        st.metric("Race Time", race["race_time"] or "TBD")
-
-    with col3:
-        st.metric("Circuit", race["circuit_name"])
-        st.metric("Country", race["circuit_country"])
-
-# -----------------------------
-# Model Status (Safe)
-# -----------------------------
-st.header("🤖 ML Model Status")
-
-model_exists = os.path.exists("model.pkl")
-
-if model_exists:
-    st.success("Model trained and available")
-else:
-    st.warning("Model not trained yet (auto pipeline will handle this)")
+# -------------------------------
+# ML Model Status (lightweight)
+# -------------------------------
+st.subheader("🤖 ML Model Status")
 
 st.info(
     """
-**Important**  
-The model only trains when:
-- Race results exist
-- Qualifying exists
-- At least 1 completed race
+The prediction model will train automatically when:
+• Qualifying data exists  
+• Race results exist  
+• At least one race is completed  
 
-Until then, the dashboard stays stable and usable.
+Until then, the platform stays live and stable.
 """
 )
 
-# -----------------------------
+# -------------------------------
 # Footer
-# -----------------------------
+# -------------------------------
 st.markdown("---")
-st.caption("F1 Analytics Platform • Fully Automated • Zero Manual Intervention")
+st.caption("F1 Analytics Platform • Stable Mode • Dashboard Removed")
