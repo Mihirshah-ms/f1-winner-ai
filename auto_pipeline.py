@@ -64,7 +64,8 @@ for season in [2024, 2025]:
     for race in races:
         round_no = race.get("round")
         race_id = race.get("raceId")
-        results = race.get("results", [])
+        results_block = race.get("results", {})
+        results = results_block.get("raceResults", [])
 
         if not results:
             continue
