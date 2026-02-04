@@ -1,3 +1,10 @@
+cur.execute("""
+DROP TABLE IF EXISTS f1_fp1_results;
+DROP TABLE IF EXISTS f1_fp2_results;
+DROP TABLE IF EXISTS f1_fp3_results;
+""")
+conn.commit()
+
 import os
 import requests
 import psycopg2
