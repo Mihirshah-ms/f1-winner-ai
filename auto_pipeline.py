@@ -13,7 +13,7 @@ DB_URL = os.environ["DATABASE_URL"]
 BASE_URL = "https://f1api.dev/api"
 SEASONS = [2024, 2025]
 MAX_ROUNDS = 24
-SLEEP_SECONDS = 0.4   # protects against 429
+SLEEP_SECONDS = 0.7   # protects against 429
 
 # -----------------------
 # DB CONNECTION
@@ -113,7 +113,7 @@ def import_race():
     for season, rnd, race_id in races:
         url = f"{BASE_URL}/{season}/{rnd}/race"
         data = fetch_json(url)
-        time.sleep(RATE_SLEEP)
+        time.sleep(SLEEP_SECONDS)
 
         if not data or "races" not in data:
             continue
