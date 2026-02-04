@@ -107,7 +107,7 @@ def import_qualy():
                         INSERT INTO f1_qualifying_results
                         (season, round, race_id, driver_id, team_id, grid_position, q1, q2, q3)
                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ON CONFLICT DO NOTHING
+                        ON CONFLICT (season, round, driver_id) DO NOTHING
                         """,
                         (
                             season,
