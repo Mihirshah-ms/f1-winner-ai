@@ -128,7 +128,8 @@ def import_qualy():
                 ))
 
     if not rows:
-        raise RuntimeError("❌ No qualifying rows parsed")
+        print("⚠️ No qualifying data available yet — skipping")
+        return
 
     execute_batch(cur, """
         INSERT INTO f1_qualifying_results
