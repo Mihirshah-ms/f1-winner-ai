@@ -1,291 +1,294 @@
 import os
 import requests
 import psycopg2
-from psycopg2.extras import execute_batch
+from datetime import datetime
 
 print("🚀 AUTO PIPELINE STARTED")
 
 # =========================
-# CONFIG
+# Database Connection
 # =========================
 DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL not set")
-
-SEASONS = [2024, 2025]
-BASE_API = "https://f1connectapi.vercel.app/api"
-
-# =========================
-# DB
-# =========================
 conn = psycopg2.connect(DATABASE_URL)
 cur = conn.cursor()
 
 # =========================
-# HELPERS
+# Helpers
 # =========================
 def fetch_json(url):
     try:
-        r = requests.get(url, timeout=20)
-        if r.status_code != 200:
-            return None
+        r = requests.get(url, timeout=30)
+        r.raise_for_status()
         return r.json()
-    except Exception:
+    except Exception as e:
+        print(f"❌ API failed: {url} → {e}")
         return None
 
 
-def get_valid_rounds(season):
+def normalize_races(data):
     """
-    Use calendar endpoint to avoid future rounds
+    f1api.dev ALWAYS returns races as dict
+    Normalize to list for safe iteration
     """
-    url = f"{BASE_API}/{season}"
-    data = fetch_json(url)
-    if not data or "races" not in data:
+    races = data.get("races")
+    if not races:
         return []
-    return [int(r["round"]) for r in data["races"]]
+    if isinstance(races, dict):
+        return [races]
+    return races
+
+
+def safe_commit():
+    try:
+        conn.commit()
+    except Exception:
+        conn.rollback()
 
 
 # =========================
-# FP IMPORTS
+# FP IMPORTER
 # =========================
-def import_fp(session, table):
+def import_fp(session):
+    table = f"f1_{session}_results"
+    total = 0
+
     print(f"🏎️ Importing {session.upper()}")
-    rows = []
 
-    for season in SEASONS:
-        for rnd in get_valid_rounds(season):
-            url = f"{BASE_API}/{season}/{rnd}/{session}"
+    for year in [2024, 2025]:
+        for rnd in range(1, 30):
+            url = f"https://f1api.dev/api/{year}/{rnd}/{session}"
             data = fetch_json(url)
-
-            if not data or "races" not in data:
+            if not data:
                 continue
 
-            race = data["races"]
+            races = normalize_races(data)
+            if not races:
+                continue
+
+            race = races[0]
             results_key = f"{session}Results"
+            results = race.get(results_key, [])
 
-            if results_key not in race:
+            if not results:
                 continue
 
-            for r in race[results_key]:
-                rows.append((
-                    season,
-                    rnd,
-                    race.get("raceId"),
-                    r.get("driverId"),
-                    r.get("teamId"),
+            for r in results:
+                cur.execute(f"""
+                    INSERT INTO {table}
+                    (season, round, race_id, driver_id, team_id, best_time)
+                    VALUES (%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT DO NOTHING
+                """, (
+                    year,
+                    int(race["round"]),
+                    race["raceId"],
+                    r["driverId"],
+                    r["teamId"],
                     r.get("time")
                 ))
+                total += 1
 
-    if not rows:
-        print(f"⚠️ No data found for {session.upper()} (normal)")
-        return
+            safe_commit()
 
-    execute_batch(cur, f"""
-        INSERT INTO {table}
-        (season, round, race_id, driver_id, team_id, best_time)
-        VALUES (%s,%s,%s,%s,%s,%s)
-        ON CONFLICT DO NOTHING
-    """, rows)
-
-    conn.commit()
-    print(f"✅ {table}: {len(rows)} rows")
+    print(f"✅ {table}: {total} rows")
 
 
 # =========================
-# QUALIFYING
+# QUALIFYING IMPORTER
 # =========================
 def import_qualy():
+    total = 0
     print("⏱️ Importing qualifying")
-    rows = []
 
-    for season in SEASONS:
-        for rnd in get_valid_rounds(season):
-            url = f"{BASE_API}/{season}/{rnd}/qualy"
+    for year in [2024, 2025]:
+        for rnd in range(1, 30):
+            url = f"https://f1api.dev/api/{year}/{rnd}/qualy"
             data = fetch_json(url)
-
-            if not data or "races" not in data:
+            if not data:
                 continue
 
-            race = data["races"]
-            if "qualyResults" not in race:
+            races = normalize_races(data)
+            if not races:
                 continue
 
-            for r in race["qualyResults"]:
-                rows.append((
-                    season,
-                    rnd,
-                    race.get("raceId"),
-                    r.get("driverId"),
-                    r.get("teamId"),
+            race = races[0]
+            results = race.get("qualyResults", [])
+            if not results:
+                continue
+
+            for r in results:
+                cur.execute("""
+                    INSERT INTO f1_qualifying_results
+                    (season, round, race_id, driver_id, team_id, grid_position, q1_time, q2_time, q3_time)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT DO NOTHING
+                """, (
+                    year,
+                    int(race["round"]),
+                    race["raceId"],
+                    r["driverId"],
+                    r["teamId"],
+                    r.get("gridPosition"),
                     r.get("q1"),
                     r.get("q2"),
-                    r.get("q3"),
-                    r.get("gridPosition")
+                    r.get("q3")
                 ))
+                total += 1
 
-    if not rows:
-        print("⚠️ No qualifying data yet — skipping")
-        return
+            safe_commit()
 
-    execute_batch(cur, """
-        INSERT INTO f1_qualifying_results
-        (season, round, race_id, driver_id, team_id,
-         q1_time, q2_time, q3_time, grid_position)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT DO NOTHING
-    """, rows)
-
-    conn.commit()
-    print(f"✅ f1_qualifying_results: {len(rows)} rows")
+    print(f"✅ f1_qualifying_results: {total} rows")
 
 
 # =========================
-# SPRINT QUALIFYING
+# RACE IMPORTER
+# =========================
+def import_race():
+    total = 0
+    print("🏆 Importing race results")
+
+    for year in [2024, 2025]:
+        for rnd in range(1, 30):
+            url = f"https://f1api.dev/api/{year}/{rnd}/race"
+            data = fetch_json(url)
+            if not data:
+                continue
+
+            races = normalize_races(data)
+            if not races:
+                continue
+
+            race = races[0]
+            results = race.get("results", [])
+            if not results:
+                continue
+
+            for r in results:
+                cur.execute("""
+                    INSERT INTO f1_race_results
+                    (season, round, race_id, driver_id, team_id, position, status)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT DO NOTHING
+                """, (
+                    year,
+                    int(race["round"]),
+                    race["raceId"],
+                    r["driver"]["driverId"],
+                    r["team"]["teamId"],
+                    r.get("position"),
+                    "Finished" if not r.get("retired") else "DNF"
+                ))
+                total += 1
+
+            safe_commit()
+
+    print(f"✅ f1_race_results: {total} rows")
+
+
+# =========================
+# SPRINT QUALY
 # =========================
 def import_sprint_qualy():
+    total = 0
     print("⚡ Importing sprint qualifying")
-    rows = []
 
-    for season in SEASONS:
-        for rnd in get_valid_rounds(season):
-            url = f"{BASE_API}/{season}/{rnd}/sprint/qualy"
+    for year in [2024, 2025]:
+        for rnd in range(1, 30):
+            url = f"https://f1api.dev/api/{year}/{rnd}/sprint/qualy"
             data = fetch_json(url)
-
-            if not data or "races" not in data:
+            if not data:
                 continue
 
-            race = data["races"]
-            if "sprintQualyResults" not in race:
+            races = normalize_races(data)
+            if not races:
                 continue
 
-            for r in race["sprintQualyResults"]:
-                rows.append((
-                    season,
-                    rnd,
-                    race.get("raceId"),
-                    r.get("driverId"),
-                    r.get("teamId"),
+            race = races[0]
+            results = race.get("sprintQualyResults", [])
+            if not results:
+                continue
+
+            for r in results:
+                cur.execute("""
+                    INSERT INTO f1_sprint_qualy_results
+                    (season, round, race_id, driver_id, team_id, grid_position, sq1_time, sq2_time, sq3_time)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT DO NOTHING
+                """, (
+                    year,
+                    int(race["round"]),
+                    race["raceId"],
+                    r["driverId"],
+                    r["teamId"],
+                    r.get("gridPosition"),
                     r.get("sq1"),
                     r.get("sq2"),
-                    r.get("sq3"),
-                    r.get("gridPosition")
+                    r.get("sq3")
                 ))
+                total += 1
 
-    if not rows:
-        print("⚠️ No sprint qualifying yet — skipping")
-        return
+            safe_commit()
 
-    execute_batch(cur, """
-        INSERT INTO f1_sprint_qualy_results
-        (season, round, race_id, driver_id, team_id,
-         sq1_time, sq2_time, sq3_time, grid_position)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT DO NOTHING
-    """, rows)
-
-    conn.commit()
-    print(f"✅ f1_sprint_qualy_results: {len(rows)} rows")
+    print(f"✅ f1_sprint_qualy_results: {total} rows")
 
 
 # =========================
 # SPRINT RACE
 # =========================
 def import_sprint_race():
+    total = 0
     print("🏁 Importing sprint race")
-    rows = []
 
-    for season in SEASONS:
-        for rnd in get_valid_rounds(season):
-            url = f"{BASE_API}/{season}/{rnd}/sprint/race"
+    for year in [2024, 2025]:
+        for rnd in range(1, 30):
+            url = f"https://f1api.dev/api/{year}/{rnd}/sprint/race"
             data = fetch_json(url)
-
-            if not data or "races" not in data:
+            if not data:
                 continue
 
-            race = data["races"]
-            if "sprintRaceResults" not in race:
+            races = normalize_races(data)
+            if not races:
                 continue
 
-            for r in race["sprintRaceResults"]:
-                rows.append((
-                    season,
-                    rnd,
-                    race.get("raceId"),
-                    r.get("driverId"),
-                    r.get("teamId"),
-                    r.get("position"),
-                    r.get("points")
+            race = races[0]
+            results = race.get("sprintRaceResults", [])
+            if not results:
+                continue
+
+            for r in results:
+                cur.execute("""
+                    INSERT INTO f1_sprint_race_results
+                    (season, round, race_id, driver_id, team_id, position)
+                    VALUES (%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT DO NOTHING
+                """, (
+                    year,
+                    int(race["round"]),
+                    race["raceId"],
+                    r["driverId"],
+                    r["teamId"],
+                    r.get("position")
                 ))
+                total += 1
 
-    if not rows:
-        print("⚠️ No sprint race yet — skipping")
-        return
+            safe_commit()
 
-    execute_batch(cur, """
-        INSERT INTO f1_sprint_race_results
-        (season, round, race_id, driver_id, team_id, position, points)
-        VALUES (%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT DO NOTHING
-    """, rows)
-
-    conn.commit()
-    print(f"✅ f1_sprint_race_results: {len(rows)} rows")
-
-
-# =========================
-# RACE RESULTS
-# =========================
-def import_race():
-    print("🏆 Importing race results")
-    rows = []
-
-    for season in SEASONS:
-        for rnd in get_valid_rounds(season):
-            url = f"{BASE_API}/{season}/{rnd}/race"
-            data = fetch_json(url)
-
-            if not data or "races" not in data:
-                continue
-
-            race = data["races"]
-            if "results" not in race:
-                continue
-
-            for r in race["results"]:
-                rows.append((
-                    season,
-                    rnd,
-                    race.get("raceId"),
-                    r["driver"]["driverId"],
-                    r["team"]["teamId"],
-                    r.get("position"),
-                    "Finished"
-                ))
-
-    if not rows:
-        print("⚠️ No race results yet — skipping")
-        return
-
-    execute_batch(cur, """
-        INSERT INTO f1_race_results
-        (season, round, race_id, driver_id, team_id, position, status)
-        VALUES (%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT DO NOTHING
-    """, rows)
-
-    conn.commit()
-    print(f"✅ f1_race_results: {len(rows)} rows")
+    print(f"✅ f1_sprint_race_results: {total} rows")
 
 
 # =========================
 # RUN PIPELINE
 # =========================
-import_fp("fp1", "f1_fp1_results")
-import_fp("fp2", "f1_fp2_results")
-import_fp("fp3", "f1_fp3_results")
+import_fp("fp1")
+import_fp("fp2")
+import_fp("fp3")
+
 import_qualy()
 import_sprint_qualy()
 import_sprint_race()
 import_race()
+
+cur.close()
+conn.close()
 
 print("🎉 AUTO PIPELINE COMPLETE")
