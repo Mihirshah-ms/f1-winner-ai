@@ -43,69 +43,6 @@ def bool_icon(val):
     return "✅" if val else "❌"
 
 # -----------------------------
-# Season Status
-# -----------------------------
-st.header("📅 Season Completion Status")
-
-season_status = load_df("""
-SELECT
-    season,
-    total_races,
-    completed_races,
-    pending_races,
-    season_complete
-FROM f1_season_status
-ORDER BY season;
-""")
-
-if season_status.empty:
-    st.warning("No season data available yet.")
-else:
-    season_status_display = season_status.copy()
-    season_status_display["season_complete"] = season_status_display["season_complete"].apply(bool_icon)
-    st.dataframe(season_status_display, use_container_width=True)
-
-# -----------------------------
-# Data Health per Race
-# -----------------------------
-st.header("🩺 Race Data Health")
-
-health_df = load_df("""
-SELECT
-    season,
-    round,
-    race_name,
-    race_date,
-    has_fp1,
-    has_fp2,
-    has_fp3,
-    has_qualy,
-    has_race,
-    has_sprint_qualy,
-    has_sprint_race
-FROM f1_data_health
-ORDER BY season DESC, round DESC;
-""")
-
-if health_df.empty:
-    st.warning("No race health data available.")
-else:
-    display_df = health_df.copy()
-
-    for col in [
-        "has_fp1", "has_fp2", "has_fp3",
-        "has_qualy", "has_race",
-        "has_sprint_qualy", "has_sprint_race"
-    ]:
-        display_df[col] = display_df[col].apply(bool_icon)
-
-    display_df["race_date"] = pd.to_datetime(
-        display_df["race_date"], errors="coerce"
-    ).dt.strftime("%d %B %Y")
-
-    st.dataframe(display_df, use_container_width=True)
-
-# -----------------------------
 # Upcoming / Latest Race
 # -----------------------------
 st.header("🏁 Latest / Upcoming Race")
