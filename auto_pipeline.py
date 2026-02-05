@@ -56,37 +56,36 @@ def exists(table, season, rnd):
 # ============================================================
 # RACE CALENDAR (f1_races)
 # ============================================================
-def import_race_calendar():
-    print("📅 Importing race calendar")
+def import_2026_calendar():
+    print("📅 Importing 2026 race calendar")
     rows = []
 
-    for rnd in range(1, MAX_ROUNDS + 1):
-        cur.execute(
-            "SELECT 1 FROM f1_races WHERE season=%s AND round=%s",
-            (SEASON, rnd),
-        )
-        if cur.fetchone():
-            continue
+    season = 2026
 
-        url = f"{BASE_URL}/{SEASON}/{rnd}"
+    for rnd in range(1, MAX_ROUNDS + 1):
+        url = f"{BASE_URL}/{season}/{rnd}"
         data = fetch_json(url)
         time.sleep(SLEEP_SECONDS)
 
-        if not data or "races" not in data:
+        if not data or "race" not in data:
             continue
 
-        race = data["races"]
+        race = data["race"][0]
+
+        schedule = race.get("schedule", {})
+        race_sched = schedule.get("race", {})
+        qualy_sched = schedule.get("qualy", {})
         circuit = race.get("circuit", {})
 
         rows.append((
             race.get("raceId"),
-            SEASON,
-            rnd,
+            season,
+            race.get("round"),
             race.get("raceName"),
-            race.get("date"),
-            race.get("time"),
-            race.get("qualyDate"),
-            race.get("qualyTime"),
+            race_sched.get("date"),
+            race_sched.get("time"),
+            qualy_sched.get("date"),
+            qualy_sched.get("time"),
             circuit.get("circuitName"),
             circuit.get("country"),
             race.get("laps"),
@@ -97,16 +96,18 @@ def import_race_calendar():
             cur,
             """
             INSERT INTO f1_races
-            (race_id, season, round, race_name, race_date, race_time,
-             qualy_date, qualy_time, circuit_name, circuit_country, laps)
+            (race_id, season, round, race_name,
+             race_date, race_time,
+             qualy_date, qualy_time,
+             circuit_name, circuit_country, laps)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT DO NOTHING
+            ON CONFLICT (season, round) DO NOTHING
             """,
             rows,
         )
         conn.commit()
 
-    print(f"✅ f1_races: {len(rows)} rows")
+    print(f"✅ f1_races (2026 calendar): {len(rows)} rows")
 
 # ============================================================
 # RUN ORDER
