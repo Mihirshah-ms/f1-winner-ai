@@ -10,7 +10,7 @@ from psycopg2.extras import execute_batch
 BASE_URL = "https://f1api.dev/api"
 SEASON = 2026
 MAX_ROUNDS = 24
-SLEEP_SECONDS = 1.2  # rate-limit safe
+SLEEP_SECONDS = 1.2
 
 DB_URL = os.getenv("DATABASE_URL")
 
@@ -45,6 +45,10 @@ def safe_int(val):
         return None
 
 
+def safe_str(val):
+    return val if val not in ["", "-"] else None
+
+
 def exists(table, season, rnd):
     cur.execute(
         f"SELECT 1 FROM {table} WHERE season=%s AND round=%s LIMIT 1",
@@ -54,38 +58,36 @@ def exists(table, season, rnd):
 
 
 # ============================================================
-# RACE CALENDAR (f1_races)
+# RACE CALENDAR
 # ============================================================
-def import_2026_calendar():
-    print("📅 Importing 2026 race calendar")
+def import_race_calendar():
+    print("📅 Importing race calendar (2026)")
     rows = []
 
-    season = 2026
-
     for rnd in range(1, MAX_ROUNDS + 1):
-        url = f"{BASE_URL}/{season}/{rnd}"
+        if exists("f1_races", SEASON, rnd):
+            continue
+
+        url = f"{BASE_URL}/{SEASON}/{rnd}"
         data = fetch_json(url)
         time.sleep(SLEEP_SECONDS)
 
-        if not data or "race" not in data:
+        if not data or "race" not in data or not data["race"]:
             continue
 
         race = data["race"][0]
-
         schedule = race.get("schedule", {})
-        race_sched = schedule.get("race", {})
-        qualy_sched = schedule.get("qualy", {})
         circuit = race.get("circuit", {})
 
         rows.append((
             race.get("raceId"),
-            season,
-            race.get("round"),
+            SEASON,
+            rnd,
             race.get("raceName"),
-            race_sched.get("date"),
-            race_sched.get("time"),
-            qualy_sched.get("date"),
-            qualy_sched.get("time"),
+            schedule.get("race", {}).get("date"),
+            schedule.get("race", {}).get("time"),
+            schedule.get("qualy", {}).get("date"),
+            schedule.get("qualy", {}).get("time"),
             circuit.get("circuitName"),
             circuit.get("country"),
             race.get("laps"),
@@ -107,13 +109,68 @@ def import_2026_calendar():
         )
         conn.commit()
 
-    print(f"✅ f1_races (2026 calendar): {len(rows)} rows")
+    print(f"✅ f1_races: {len(rows)} rows")
+
 
 # ============================================================
-# RUN ORDER
+# FP / QUALY / SPRINT / RACE RESULTS
 # ============================================================
-import_2026_calendar()
+def import_session(
+    label, table, session_key, fields
+):
+    print(f"🏎️ Importing {label}")
+    rows = []
+
+    for rnd in range(1, MAX_ROUNDS + 1):
+        if exists(table, SEASON, rnd):
+            continue
+
+        url = f"{BASE_URL}/{SEASON}/{rnd}"
+        data = fetch_json(url)
+        time.sleep(SLEEP_SECONDS)
+
+        if not data or "race" not in data or not data["race"]:
+            continue
+
+        race = data["race"][0]
+        session_rows = race.get(session_key, [])
+
+        for r in session_rows:
+            row = [SEASON, rnd, race.get("raceId")]
+            for f in fields:
+                row.append(
+                    safe_int(r.get(f))
+                    if "position" in f or "grid" in f or "points" in f
+                    else safe_str(r.get(f))
+                )
+            rows.append(tuple(row))
+
+    if rows:
+        placeholders = ",".join(["%s"] * len(rows[0]))
+        execute_batch(
+            cur,
+            f"""
+            INSERT INTO {table}
+            VALUES ({placeholders})
+            ON CONFLICT DO NOTHING
+            """,
+            rows,
+        )
+        conn.commit()
+
+    print(f"✅ {table}: {len(rows)} rows")
+
+
+# ============================================================
+# RUN ORDER (2026)
+# ============================================================
+import_race_calendar()
+
+# NOTE:
+# FP / Qualy / Sprint / Race results
+# will naturally be EMPTY until sessions happen.
+# This is expected and SAFE.
 
 cur.close()
 conn.close()
-print("🎉 AUTO PIPELINE COMPLETE (2026)")
+print("🎉 AUTO PIPELINE COMPLETE (2026 ONLY)")
