@@ -3,6 +3,8 @@ import psycopg2
 import pandas as pd
 import streamlit as st
 from datetime import datetime
+import os
+print("DATABASE_URL =", os.getenv("DATABASE_URL"))
 
 # -----------------------------
 # Page Config
