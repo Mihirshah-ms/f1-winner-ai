@@ -1,156 +1,179 @@
+import os
 import psycopg2
+import pandas as pd
 import streamlit as st
-import time
+from datetime import datetime
 
-@st.cache_resource(show_spinner="Connecting to database...")
-def get_conn():
-    try:
-        conn = psycopg2.connect(
-            host=st.secrets["DB_HOST"],
-            port=int(st.secrets["DB_PORT"]),
-            dbname=st.secrets["DB_NAME"],
-            user=st.secrets["DB_USER"],
-            password=st.secrets["DB_PASSWORD"],
-            sslmode="require",
-            connect_timeout=5,     # ⬅️ CRITICAL
-            keepalives=1,
-            keepalives_idle=30,
-            keepalives_interval=10,
-            keepalives_count=5
-        )
-        return conn
-
-    except psycopg2.OperationalError as e:
-        st.error("❌ Database connection failed")
-        st.code(str(e))
-        st.stop()
-
-conn = get_conn()
-cur = conn.cursor()
-cur.execute("SELECT 1;")
-st.success("✅ Database connected successfully")
-
-# ----------------------------------------------------
-# Page config
-# ----------------------------------------------------
+# -----------------------------
+# Page Config
+# -----------------------------
 st.set_page_config(
-    page_title="F1 Winner AI",
-    layout="wide"
+    page_title="F1 Data Health & Predictions",
+    layout="wide",
 )
 
-st.title("🏎️ F1 Winner AI")
-st.caption("Read-only analytics • 2026 live season")
+st.title("🏎️ Formula 1 Data Health Dashboard")
 
-# ----------------------------------------------------
-# Database connection (cached)
-# ----------------------------------------------------
+# -----------------------------
+# Database Connection
+# -----------------------------
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    st.error("DATABASE_URL not set")
+    st.stop()
+
 @st.cache_resource
 def get_conn():
-    return psycopg2.connect(
-        host=st.secrets["DB_HOST"],
-        port=st.secrets["DB_PORT"],
-        dbname=st.secrets["DB_NAME"],
-        user=st.secrets["DB_USER"],
-        password=st.secrets["DB_PASSWORD"],
-        sslmode="require"
-    )
+    return psycopg2.connect(DATABASE_URL)
 
 conn = get_conn()
 
-# ----------------------------------------------------
-# Helper queries (lightweight, safe)
-# ----------------------------------------------------
-@st.cache_data(ttl=300)
-def get_upcoming_2026_race():
-    query = """
-        SELECT
-            r.season,
-            r.round,
-            r.race_name,
-            r.race_date,
-            r.race_time,
-            r.circuit_name,
-            r.circuit_country
-        FROM f1_races r
-        LEFT JOIN f1_race_results rr
-          ON r.season = rr.season
-         AND r.round = rr.round
-        WHERE r.season = 2026
-          AND rr.season IS NULL
-        ORDER BY r.round ASC
-        LIMIT 1;
-    """
-    return pd.read_sql(query, conn)
+# -----------------------------
+# Helpers
+# -----------------------------
+def load_df(query):
+    try:
+        return pd.read_sql(query, conn)
+    except Exception as e:
+        st.error(str(e))
+        return pd.DataFrame()
 
-@st.cache_data(ttl=300)
-def get_recent_results():
-    query = """
-        SELECT
-            season,
-            round,
-            race_name,
-            race_date
-        FROM f1_races
-        WHERE season >= 2024
-        ORDER BY season DESC, round DESC
-        LIMIT 10;
-    """
-    return pd.read_sql(query, conn)
+def bool_icon(val):
+    return "✅" if val else "❌"
 
-# ----------------------------------------------------
-# UI sections
-# ----------------------------------------------------
-st.subheader("🏁 Upcoming Race (2026)")
+# -----------------------------
+# Season Status
+# -----------------------------
+st.header("📅 Season Completion Status")
 
-upcoming = get_upcoming_2026_race()
+season_status = load_df("""
+SELECT
+    season,
+    total_races,
+    completed_races,
+    pending_races,
+    season_complete
+FROM f1_season_status
+ORDER BY season;
+""")
 
-if upcoming.empty:
-    st.info("No upcoming 2026 races found yet.")
+if season_status.empty:
+    st.warning("No season data available yet.")
 else:
-    r = upcoming.iloc[0]
+    season_status_display = season_status.copy()
+    season_status_display["season_complete"] = season_status_display["season_complete"].apply(bool_icon)
+    st.dataframe(season_status_display, use_container_width=True)
+
+# -----------------------------
+# Data Health per Race
+# -----------------------------
+st.header("🩺 Race Data Health")
+
+health_df = load_df("""
+SELECT
+    season,
+    round,
+    race_name,
+    race_date,
+    has_fp1,
+    has_fp2,
+    has_fp3,
+    has_qualy,
+    has_race,
+    has_sprint_qualy,
+    has_sprint_race
+FROM f1_data_health
+ORDER BY season DESC, round DESC;
+""")
+
+if health_df.empty:
+    st.warning("No race health data available.")
+else:
+    display_df = health_df.copy()
+
+    for col in [
+        "has_fp1", "has_fp2", "has_fp3",
+        "has_qualy", "has_race",
+        "has_sprint_qualy", "has_sprint_race"
+    ]:
+        display_df[col] = display_df[col].apply(bool_icon)
+
+    display_df["race_date"] = pd.to_datetime(
+        display_df["race_date"], errors="coerce"
+    ).dt.strftime("%d %B %Y")
+
+    st.dataframe(display_df, use_container_width=True)
+
+# -----------------------------
+# Upcoming / Latest Race
+# -----------------------------
+st.header("🏁 Latest / Upcoming Race")
+
+race_info = load_df("""
+SELECT
+    season,
+    round,
+    race_name,
+    race_date,
+    race_time,
+    circuit_name,
+    circuit_country
+FROM f1_races
+ORDER BY season DESC, round DESC
+LIMIT 1;
+""")
+
+if race_info.empty:
+    st.warning("No race information available.")
+else:
+    race = race_info.iloc[0]
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.metric("Season", r["season"])
-        st.metric("Round", r["round"])
+        st.metric("Season", int(race["season"]))
+        st.metric("Round", int(race["round"]))
 
     with col2:
-        st.metric("Race", r["race_name"])
-        st.metric("Circuit", r["circuit_name"])
+        date_str = (
+            pd.to_datetime(race["race_date"], errors="coerce")
+            .strftime("%d %B %Y")
+            if race["race_date"] else "TBD"
+        )
+        st.metric("Race Date", date_str)
+        st.metric("Race Time", race["race_time"] or "TBD")
 
     with col3:
-        st.metric("Country", r["circuit_country"])
-        st.metric("Race Date", str(r["race_date"]))
+        st.metric("Circuit", race["circuit_name"])
+        st.metric("Country", race["circuit_country"])
 
-# ----------------------------------------------------
-st.divider()
+# -----------------------------
+# Model Status (Safe)
+# -----------------------------
+st.header("🤖 ML Model Status")
 
-st.subheader("📊 Recent Races (Read-only)")
+model_exists = os.path.exists("model.pkl")
 
-recent = get_recent_results()
-
-if recent.empty:
-    st.warning("No race data available.")
+if model_exists:
+    st.success("Model trained and available")
 else:
-    st.dataframe(
-        recent,
-        use_container_width=True,
-        hide_index=True
-    )
-
-# ----------------------------------------------------
-st.divider()
-
-st.subheader("🤖 ML Model Status")
+    st.warning("Model not trained yet (auto pipeline will handle this)")
 
 st.info(
-    "Model training is handled by the auto-pipeline.\n\n"
-    "Training activates automatically once:\n"
-    "• Qualifying exists\n"
-    "• Race results exist\n"
-    "• At least one 2026 race is completed"
+    """
+**Important**  
+The model only trains when:
+- Race results exist
+- Qualifying exists
+- At least 1 completed race
+
+Until then, the dashboard stays stable and usable.
+"""
 )
 
-# ----------------------------------------------------
-st.caption("F1 Analytics Platform • Streamlit Cloud • Safe Mode Enabled")
+# -----------------------------
+# Footer
+# -----------------------------
+st.markdown("---")
+st.caption("F1 Analytics Platform • Fully Automated • Zero Manual Intervention")
