@@ -10,7 +10,7 @@ from psycopg2.extras import execute_batch
 BASE_URL = "https://f1api.dev/api"
 SEASONS = [2024, 2025]
 MAX_ROUNDS = 24
-SLEEP_SECONDS = 1.2  # rate limit safety
+SLEEP_SECONDS = 1.2
 
 DB_URL = os.getenv("DATABASE_URL")
 
@@ -53,14 +53,6 @@ def race_exists(season, rnd):
     return cur.fetchone() is not None
 
 
-def qualy_exists(season, rnd):
-    cur.execute(
-        "SELECT 1 FROM f1_qualifying_results WHERE season=%s AND round=%s LIMIT 1",
-        (season, rnd),
-    )
-    return cur.fetchone() is not None
-
-
 def sprint_race_exists(season, rnd):
     cur.execute(
         "SELECT 1 FROM f1_sprint_race_results WHERE season=%s AND round=%s LIMIT 1",
@@ -77,14 +69,6 @@ def sprint_qualy_exists(season, rnd):
     return cur.fetchone() is not None
 
 
-def fp_exists(table, season, rnd):
-    cur.execute(
-        f"SELECT 1 FROM {table} WHERE season=%s AND round=%s LIMIT 1",
-        (season, rnd),
-    )
-    return cur.fetchone() is not None
-
-
 # =========================
 # SPRINT QUALIFYING
 # =========================
@@ -94,7 +78,6 @@ def import_sprint_qualy():
 
     for season in SEASONS:
         for rnd in range(1, MAX_ROUNDS + 1):
-
             if sprint_qualy_exists(season, rnd):
                 continue
 
@@ -143,7 +126,6 @@ def import_sprint_race():
 
     for season in SEASONS:
         for rnd in range(1, MAX_ROUNDS + 1):
-
             if sprint_race_exists(season, rnd):
                 continue
 
@@ -185,7 +167,7 @@ def import_sprint_race():
 
 
 # =========================
-# RACE RESULTS (ADDED ONLY)
+# RACE RESULTS
 # =========================
 def import_race():
     print("🏆 Importing race results")
@@ -193,7 +175,6 @@ def import_race():
 
     for season in SEASONS:
         for rnd in range(1, MAX_ROUNDS + 1):
-
             if race_exists(season, rnd):
                 continue
 
@@ -226,4 +207,25 @@ def import_race():
             cur,
             """
             INSERT INTO f1_race_results
-            (season, round, race_id, driver_id, team_id, position, grid, points, race
+            (season, round, race_id, driver_id, team_id,
+             position, grid, points, race_time, status)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT DO NOTHING
+            """,
+            rows,
+        )
+        conn.commit()
+
+    print(f"✅ f1_race_results: {len(rows)} rows")
+
+
+# =========================
+# RUN ORDER
+# =========================
+import_sprint_qualy()
+import_sprint_race()
+import_race()
+
+cur.close()
+conn.close()
+print("🎉 AUTO PIPELINE COMPLETE")
