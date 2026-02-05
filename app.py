@@ -83,7 +83,14 @@ else:
             if race["race_date"] else "TBD"
         )
         st.metric("Race Date", date_str)
-        st.metric("Race Time", race["race_time"] or "TBD")
+        race_time = race.get("race_time")
+
+        if race_time:
+            race_time_display = race_time.strftime("%H:%M")
+        else:
+            race_time_display = "TBD"
+
+        st.metric("Race Time", race_time_display)
 
     with col3:
         st.metric("Circuit", race["circuit_name"])
