@@ -185,12 +185,45 @@ def import_sprint_race():
 
 
 # =========================
-# RUN ORDER
+# RACE RESULTS (ADDED ONLY)
 # =========================
+def import_race():
+    print("🏆 Importing race results")
+    rows = []
 
-import_sprint_qualy()
-import_sprint_race()
+    for season in SEASONS:
+        for rnd in range(1, MAX_ROUNDS + 1):
 
-cur.close()
-conn.close()
-print("🎉 AUTO PIPELINE COMPLETE")
+            if race_exists(season, rnd):
+                continue
+
+            url = f"{BASE_URL}/{season}/{rnd}"
+            data = fetch_json(url)
+            time.sleep(SLEEP_SECONDS)
+
+            if not data or "races" not in data:
+                continue
+
+            race = data["races"]
+            for r in race.get("results", []):
+                rows.append(
+                    (
+                        season,
+                        rnd,
+                        race.get("raceId"),
+                        r["driver"]["driverId"],
+                        r["team"]["teamId"],
+                        safe_int(r.get("position")),
+                        safe_int(r.get("grid")),
+                        safe_int(r.get("points")),
+                        r.get("time"),
+                        r.get("retired"),
+                    )
+                )
+
+    if rows:
+        execute_batch(
+            cur,
+            """
+            INSERT INTO f1_race_results
+            (season, round, race_id, driver_id, team_id, position, grid, points, race
