@@ -346,7 +346,7 @@ def import_race_results():
 # ============================================================
 # RUN ORDER
 # ============================================================
-import_race_calendar()
+import_2026_calendar()
 import_fp("fp1", "f1_fp1_results", "fp1Results")
 import_fp("fp2", "f1_fp2_results", "fp2Results")
 import_fp("fp3", "f1_fp3_results", "fp3Results")
