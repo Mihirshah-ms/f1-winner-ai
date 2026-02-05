@@ -1,27 +1,34 @@
-import streamlit as st
 import psycopg2
-import pandas as pd
+import streamlit as st
+import time
 
-# 🔑 PASTE THIS HERE
-@st.cache_resource
+@st.cache_resource(show_spinner="Connecting to database...")
 def get_conn():
     try:
-        return psycopg2.connect(
+        conn = psycopg2.connect(
             host=st.secrets["DB_HOST"],
             port=int(st.secrets["DB_PORT"]),
             dbname=st.secrets["DB_NAME"],
             user=st.secrets["DB_USER"],
             password=st.secrets["DB_PASSWORD"],
             sslmode="require",
-            connect_timeout=10
+            connect_timeout=5,     # ⬅️ CRITICAL
+            keepalives=1,
+            keepalives_idle=30,
+            keepalives_interval=10,
+            keepalives_count=5
         )
-    except psycopg2.OperationalError:
-        st.error("❌ Cannot connect to database")
+        return conn
+
+    except psycopg2.OperationalError as e:
+        st.error("❌ Database connection failed")
+        st.code(str(e))
         st.stop()
 
-# 🔑 USE IT HERE
 conn = get_conn()
 cur = conn.cursor()
+cur.execute("SELECT 1;")
+st.success("✅ Database connected successfully")
 
 # ----------------------------------------------------
 # Page config
