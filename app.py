@@ -2,6 +2,27 @@ import streamlit as st
 import psycopg2
 import pandas as pd
 
+# 🔑 PASTE THIS HERE
+@st.cache_resource
+def get_conn():
+    try:
+        return psycopg2.connect(
+            host=st.secrets["DB_HOST"],
+            port=int(st.secrets["DB_PORT"]),
+            dbname=st.secrets["DB_NAME"],
+            user=st.secrets["DB_USER"],
+            password=st.secrets["DB_PASSWORD"],
+            sslmode="require",
+            connect_timeout=10
+        )
+    except psycopg2.OperationalError:
+        st.error("❌ Cannot connect to database")
+        st.stop()
+
+# 🔑 USE IT HERE
+conn = get_conn()
+cur = conn.cursor()
+
 # ----------------------------------------------------
 # Page config
 # ----------------------------------------------------
