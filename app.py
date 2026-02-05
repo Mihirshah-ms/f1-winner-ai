@@ -49,15 +49,19 @@ st.header("🏁 Latest / Upcoming Race")
 
 race_info = load_df("""
 SELECT
-    season,
-    round,
-    race_name,
-    race_date,
-    race_time,
-    circuit_name,
-    circuit_country
-FROM f1_races
-ORDER BY season DESC, round DESC
+    r.season,
+    r.round,
+    r.race_name,
+    r.race_date,
+    r.race_time,
+    r.circuit_name,
+    r.circuit_country
+FROM f1_races r
+LEFT JOIN f1_race_results rr
+  ON r.season = rr.season
+ AND r.round = rr.round
+WHERE rr.season IS NULL
+ORDER BY r.season ASC, r.round ASC
 LIMIT 1;
 """)
 
