@@ -4,30 +4,30 @@ import requests
 import psycopg2
 from psycopg2.extras import execute_batch
 
-# =========================
-# CONFIG
-# =========================
+# ============================================================
+# CONFIG (2026 ONLY)
+# ============================================================
 BASE_URL = "https://f1api.dev/api"
-SEASONS = [2024, 2025]
+SEASON = 2026
 MAX_ROUNDS = 24
-SLEEP_SECONDS = 1.2
+SLEEP_SECONDS = 1.2  # rate-limit safe
 
 DB_URL = os.getenv("DATABASE_URL")
 
-# =========================
+# ============================================================
 # DB CONNECT
-# =========================
+# ============================================================
 conn = psycopg2.connect(DB_URL)
 cur = conn.cursor()
 
-print("🚀 AUTO PIPELINE STARTED")
+print("🚀 AUTO PIPELINE STARTED (2026 ONLY)")
 
-# =========================
+# ============================================================
 # HELPERS
-# =========================
+# ============================================================
 def fetch_json(url):
     try:
-        r = requests.get(url, timeout=15)
+        r = requests.get(url, timeout=20)
         r.raise_for_status()
         print(f"🌐 API OK → {url}")
         return r.json()
@@ -37,195 +37,82 @@ def fetch_json(url):
 
 
 def safe_int(val):
+    if val in [None, "-", ""]:
+        return None
     try:
-        if val in [None, "-", ""]:
-            return None
         return int(val)
     except:
         return None
 
 
-def race_exists(season, rnd):
+def exists(table, season, rnd):
     cur.execute(
-        "SELECT 1 FROM f1_race_results WHERE season=%s AND round=%s LIMIT 1",
+        f"SELECT 1 FROM {table} WHERE season=%s AND round=%s LIMIT 1",
         (season, rnd),
     )
     return cur.fetchone() is not None
 
 
-def sprint_race_exists(season, rnd):
-    cur.execute(
-        "SELECT 1 FROM f1_sprint_race_results WHERE season=%s AND round=%s LIMIT 1",
-        (season, rnd),
-    )
-    return cur.fetchone() is not None
-
-
-def sprint_qualy_exists(season, rnd):
-    cur.execute(
-        "SELECT 1 FROM f1_sprint_qualy_results WHERE season=%s AND round=%s LIMIT 1",
-        (season, rnd),
-    )
-    return cur.fetchone() is not None
-
-
-# =========================
-# SPRINT QUALIFYING
-# =========================
-def import_sprint_qualy():
-    print("⚡ Importing sprint qualifying")
+# ============================================================
+# RACE CALENDAR (f1_races)
+# ============================================================
+def import_race_calendar():
+    print("📅 Importing race calendar")
     rows = []
 
-    for season in SEASONS:
-        for rnd in range(1, MAX_ROUNDS + 1):
-            if sprint_qualy_exists(season, rnd):
-                continue
+    for rnd in range(1, MAX_ROUNDS + 1):
+        cur.execute(
+            "SELECT 1 FROM f1_races WHERE season=%s AND round=%s",
+            (SEASON, rnd),
+        )
+        if cur.fetchone():
+            continue
 
-            url = f"{BASE_URL}/{season}/{rnd}/sprint/qualy"
-            data = fetch_json(url)
-            time.sleep(SLEEP_SECONDS)
+        url = f"{BASE_URL}/{SEASON}/{rnd}"
+        data = fetch_json(url)
+        time.sleep(SLEEP_SECONDS)
 
-            if not data or "races" not in data:
-                continue
+        if not data or "races" not in data:
+            continue
 
-            race = data["races"]
-            for r in race.get("sprintQualyResults", []):
-                rows.append(
-                    (
-                        season,
-                        rnd,
-                        race.get("raceId"),
-                        r.get("driverId"),
-                        r.get("teamId"),
-                        safe_int(r.get("gridPosition")),
-                    )
-                )
+        race = data["races"]
+        circuit = race.get("circuit", {})
+
+        rows.append((
+            race.get("raceId"),
+            SEASON,
+            rnd,
+            race.get("raceName"),
+            race.get("date"),
+            race.get("time"),
+            race.get("qualyDate"),
+            race.get("qualyTime"),
+            circuit.get("circuitName"),
+            circuit.get("country"),
+            race.get("laps"),
+        ))
 
     if rows:
         execute_batch(
             cur,
             """
-            INSERT INTO f1_sprint_qualy_results
-            (season, round, race_id, driver_id, team_id, grid_position)
-            VALUES (%s,%s,%s,%s,%s,%s)
+            INSERT INTO f1_races
+            (race_id, season, round, race_name, race_date, race_time,
+             qualy_date, qualy_time, circuit_name, circuit_country, laps)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT DO NOTHING
             """,
             rows,
         )
         conn.commit()
 
-    print(f"✅ f1_sprint_qualy_results: {len(rows)} rows")
+    print(f"✅ f1_races: {len(rows)} rows")
 
-
-# =========================
-# SPRINT RACE
-# =========================
-def import_sprint_race():
-    print("🏁 Importing sprint race")
-    rows = []
-
-    for season in SEASONS:
-        for rnd in range(1, MAX_ROUNDS + 1):
-            if sprint_race_exists(season, rnd):
-                continue
-
-            url = f"{BASE_URL}/{season}/{rnd}/sprint/race"
-            data = fetch_json(url)
-            time.sleep(SLEEP_SECONDS)
-
-            if not data or "races" not in data:
-                continue
-
-            race = data["races"]
-            for r in race.get("sprintRaceResults", []):
-                rows.append(
-                    (
-                        season,
-                        rnd,
-                        race.get("raceId"),
-                        r.get("driverId"),
-                        r.get("teamId"),
-                        safe_int(r.get("position")),
-                        safe_int(r.get("points")),
-                    )
-                )
-
-    if rows:
-        execute_batch(
-            cur,
-            """
-            INSERT INTO f1_sprint_race_results
-            (season, round, race_id, driver_id, team_id, position, points)
-            VALUES (%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT DO NOTHING
-            """,
-            rows,
-        )
-        conn.commit()
-
-    print(f"✅ f1_sprint_race_results: {len(rows)} rows")
-
-
-# =========================
-# RACE RESULTS
-# =========================
-def import_race():
-    print("🏆 Importing race results")
-    rows = []
-
-    for season in SEASONS:
-        for rnd in range(1, MAX_ROUNDS + 1):
-            if race_exists(season, rnd):
-                continue
-
-            url = f"{BASE_URL}/{season}/{rnd}"
-            data = fetch_json(url)
-            time.sleep(SLEEP_SECONDS)
-
-            if not data or "races" not in data:
-                continue
-
-            race = data["races"]
-            for r in race.get("results", []):
-                rows.append(
-                    (
-                        season,
-                        rnd,
-                        race.get("raceId"),
-                        r["driver"]["driverId"],
-                        r["team"]["teamId"],
-                        safe_int(r.get("position")),
-                        safe_int(r.get("grid")),
-                        safe_int(r.get("points")),
-                        r.get("time"),
-                        r.get("retired"),
-                    )
-                )
-
-    if rows:
-        execute_batch(
-            cur,
-            """
-            INSERT INTO f1_race_results
-            (season, round, race_id, driver_id, team_id,
-             position, grid, points, race_time, status)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT DO NOTHING
-            """,
-            rows,
-        )
-        conn.commit()
-
-    print(f"✅ f1_race_results: {len(rows)} rows")
-
-
-# =========================
+# ============================================================
 # RUN ORDER
-# =========================
-import_sprint_qualy()
-import_sprint_race()
-import_race()
+# ============================================================
+import_race_calendar()
 
 cur.close()
 conn.close()
-print("🎉 AUTO PIPELINE COMPLETE")
+print("🎉 AUTO PIPELINE COMPLETE (2026)")
