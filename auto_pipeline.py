@@ -112,7 +112,7 @@ def import_2026_calendar():
 # ============================================================
 # RUN ORDER
 # ============================================================
-import_race_calendar()
+import_2026_calendar()
 
 cur.close()
 conn.close()
