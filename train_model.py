@@ -42,6 +42,11 @@ y = df["race_position"]
 X = X.select_dtypes(include=["number"])
 
 # -------------------------
+# Handle missing values safely
+# -------------------------
+X = X.fillna(0)
+
+# -------------------------
 # Train model
 # -------------------------
 model = RandomForestClassifier(
